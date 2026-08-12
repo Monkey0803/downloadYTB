@@ -15,6 +15,7 @@ from typing import Callable, List, Optional
 
 import yt_dlp
 
+from . import i18n
 from .ffmpeg_util import ffmpeg_location_for_ytdlp
 
 DEFAULT_SAVE_DIR = os.path.expanduser("~/Downloads")
@@ -169,58 +170,47 @@ def _base_opts(with_cookies: bool = True) -> dict:
 def _wrap_error(exc: Exception) -> DownloadError:
     msg = str(exc)
     if "Requested format is not available" in msg or "Only images are available" in msg:
-        err = DownloadError(
-            "未能获取可下载的视频格式：可能是浏览器 Cookie 干扰或站点临时限制。"
-            "可稍后重试，或在「设置」中将浏览器 Cookie 改为「不使用」后再试")
+        err = DownloadError(i18n.tr("error_format_unavailable"))
         err.format_unavailable = True
         return err
     if "empty media response" in msg or "not granting access" in msg:
-        return DownloadError(
-            "Instagram 拒绝了匿名访问，该帖子需要登录才能下载。"
-            "可在「设置」中选择浏览器 Cookie 后重试")
+        return DownloadError(i18n.tr("error_instagram_login_video"))
     low = msg.lower()
     # —— 哔哩哔哩大会员 / 付费内容 ——
     if any(k in msg for k in ("大会员", "充电专属", "付费", "premium")) \
             or "vip" in low or "paid" in low:
-        return DownloadError(
-            "该清晰度或视频为 B 站大会员 / 付费专属，匿名或普通账号最高仅 1080P。"
-            "可在「设置」中选择已登录（大会员）的浏览器 Cookie 后重试")
+        return DownloadError(i18n.tr("error_bilibili_premium"))
     # —— 抖音 / B 站风控（频繁访问被拦截，需登录或稍后重试） ——
     if any(k in msg for k in ("风控", "验证", "captcha", "rate limit",
                               "rate-limit", "too many", "frequently",
                               "blocked", "412")):
-        return DownloadError(
-            "访问过于频繁或被风控拦截，请稍后重试；如持续失败，"
-            "可在「设置」中选择已登录的浏览器 Cookie")
+        return DownloadError(i18n.tr("error_rate_limit"))
     if "login_required" in msg or "Login required" in msg or "log in" in low \
             or "需要登录" in msg or "account_cookies" in msg:
-        return DownloadError("该内容需要登录才能访问，可在「设置」中选择浏览器 Cookie 后重试")
+        return DownloadError(i18n.tr("error_login_required"))
     if any(k in msg for k in ("geo", "region", "country", "地区", "区域",
                               "not available in your")):
-        return DownloadError("该视频受地区限制，当前网络环境无法下载")
+        return DownloadError(i18n.tr("error_geo"))
     if "Unsupported URL" in msg:
-        return DownloadError(
-            "不支持的链接，请输入 YouTube / X / Instagram / 抖音 / 哔哩哔哩 视频链接")
+        return DownloadError(i18n.tr("error_unsupported_video_url"))
     if "is not a valid URL" in msg:
-        return DownloadError("链接格式无效，请检查后重试")
+        return DownloadError(i18n.tr("error_invalid_url"))
     # —— HTTP 403：多为下载 URL 过期/签名失效，常因 yt-dlp 版本落后于
     # YouTube 反爬更新。提示升级或重试，通常升级 yt-dlp 即可解决。 ——
     if "403" in msg or "forbidden" in low:
-        return DownloadError(
-            "下载被服务器拒绝（HTTP 403）：多为下载链接过期或站点反爬更新。"
-            "请稍后重试；如持续失败，请升级 yt-dlp 到最新版本")
+        return DownloadError(i18n.tr("error_forbidden"))
     if "unable to download" in low or any(
             k in msg for k in ("Network", "timed out", "getaddrinfo", "Connection")):
-        return DownloadError("网络请求失败，请检查网络连接后重试")
+        return DownloadError(i18n.tr("error_network"))
     if "Private video" in msg or "members-only" in msg:
-        return DownloadError("该视频为私享/会员视频，无法下载")
+        return DownloadError(i18n.tr("error_private_video"))
     if any(k in msg for k in ("Video unavailable", "no longer available",
                               "not found", "404", "已失效", "稿件不可见",
                               "不存在", "已删除")):
-        return DownloadError("视频不存在或已被删除")
+        return DownloadError(i18n.tr("error_video_missing"))
     if "age" in low and "confirm" in low:
-        return DownloadError("该视频有年龄限制，需要登录才能下载")
-    return DownloadError(f"操作失败：{msg[:200]}")
+        return DownloadError(i18n.tr("error_age_restricted"))
+    return DownloadError(i18n.tr("error_operation", message=msg[:200]))
 
 
 def _has_usable_formats(info: dict) -> bool:
@@ -242,7 +232,7 @@ def probe(url: str) -> VideoInfo:
     """
     url = (url or "").strip()
     if not url:
-        raise DownloadError("请输入视频链接")
+        raise DownloadError(i18n.tr("enter_video_link"))
 
     def extract(opts):
         # 解析阶段不做格式选择，避免无格式时直接抛
@@ -254,7 +244,7 @@ def probe(url: str) -> VideoInfo:
         if info.get("_type") == "playlist":
             entries = info.get("entries") or []
             if not entries:
-                raise DownloadError("链接中没有可下载的视频")
+                raise DownloadError(i18n.tr("error_no_video"))
             info = entries[0]
         return info
 
@@ -451,7 +441,7 @@ def _run_download(
         or info.get("_filename")
     )
     if not path or not os.path.isfile(path):
-        raise DownloadError("下载完成但未找到输出文件")
+        raise DownloadError(i18n.tr("error_output_missing"))
     return path
 
 

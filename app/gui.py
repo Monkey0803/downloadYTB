@@ -21,7 +21,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import core, images, menubar, settings, theme
+from . import core, i18n, images, menubar, settings, theme
 from .widgets import (
     CheckPill, GlassCard, ImagePicker, LogoSwatch, PillButton, PillSelect,
     RoundEntry, RoundProgress, SegmentedControl, SidebarItem, TFrame, TLabel,
@@ -65,8 +65,8 @@ def asset_path(name: str):
 # 「更换 App Logo」候选：key 对应 assets/logos/{key}_icon.png（1024，Dock 用）、
 # assets/logos/{key}_512.png（512，窗口图标 + 设置页预览用）
 # 与 assets/logos/{key}_menubar.png（36px@2x，macOS menubar 状态栏图标用）
-LOGO_OPTIONS = [("classic", "经典蓝"), ("neon", "霓虹"),
-                ("sunset", "日落"), ("mint", "薄荷")]
+LOGO_OPTIONS = [("classic", "classic_blue"), ("neon", "neon"),
+                ("sunset", "sunset"), ("mint", "mint")]
 
 
 def logo_icon_path(key: str, size: int = 1024):
@@ -146,7 +146,7 @@ class VideoPanel(TFrame):
         card1.set_height(130)
         card1.pack(fill="x", pady=(0, 12))
         b1 = card1.body
-        TLabel(b1, text="视频链接", font=f.f_section, bg_role="CARD",
+        TLabel(b1, text=i18n.tr("video_link"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
 
         row = TFrame(b1, bg_role="CARD")
@@ -158,10 +158,10 @@ class VideoPanel(TFrame):
         self.url_entry = RoundEntry(row, textvariable=self.url_var, font=f.f_body)
         self.url_entry.pack(side="left", fill="x", expand=True)
         self.url_entry.entry.bind("<Return>", lambda e: self.on_probe())
-        self.paste_btn = PillButton(row, "粘贴", command=self.on_paste,
+        self.paste_btn = PillButton(row, i18n.tr("paste"), command=self.on_paste,
                                     font=f.f_btn, width=68, bg_role="CARD")
         self.paste_btn.pack(side="left", padx=(10, 0))
-        self.probe_btn = PillButton(row, "解析", command=self.on_probe,
+        self.probe_btn = PillButton(row, i18n.tr("probe"), command=self.on_probe,
                                     font=f.f_btn, width=68, bg_role="CARD")
         self.probe_btn.pack(side="left", padx=(8, 0))
 
@@ -174,7 +174,7 @@ class VideoPanel(TFrame):
         card2.set_height(114)
         card2.pack(fill="x", pady=(0, 12))
         b2 = card2.body
-        TLabel(b2, text="下载选项", font=f.f_section, bg_role="CARD",
+        TLabel(b2, text=i18n.tr("download_options"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
 
         opt_row = TFrame(b2, bg_role="CARD")
@@ -182,16 +182,17 @@ class VideoPanel(TFrame):
         self.mode_var = tk.StringVar(value="video")
         if self._show_audio:
             self.mode_seg = SegmentedControl(
-                opt_row, [("视频（含音轨）", "video"), ("仅音频 (MP3)", "audio")],
+                opt_row, [(i18n.tr("video_with_audio"), "video"),
+                          (i18n.tr("audio_only"), "audio")],
                 self.mode_var, command=self._on_mode_change, font=f.f_btn, width=250,
             )
             self.mode_seg.pack(side="left")
-            TLabel(opt_row, text="清晰度", font=f.f_body, bg_role="CARD",
+            TLabel(opt_row, text=i18n.tr("quality"), font=f.f_body, bg_role="CARD",
                    fg_role="TEXT_SUB").pack(side="left", padx=(22, 8))
         else:
-            TLabel(opt_row, text="清晰度", font=f.f_body, bg_role="CARD",
+            TLabel(opt_row, text=i18n.tr("quality"), font=f.f_body, bg_role="CARD",
                    fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
-        self.quality_var = tk.StringVar(value="请先解析链接")
+        self.quality_var = tk.StringVar(value=i18n.tr("probe_first"))
         self.quality_select = PillSelect(opt_row, self.quality_var,
                                          font=f.f_btn, width=196)
         self.quality_select.pack(side="left")
@@ -201,7 +202,7 @@ class VideoPanel(TFrame):
         card3.set_height(102)
         card3.pack(fill="x", pady=(0, 14))
         b3 = card3.body
-        TLabel(b3, text="保存位置", font=f.f_section, bg_role="CARD",
+        TLabel(b3, text=i18n.tr("save_location"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
 
         dir_row = TFrame(b3, bg_role="CARD")
@@ -209,17 +210,17 @@ class VideoPanel(TFrame):
         self.dir_var = tk.StringVar(value=self.app.default_save_dir(self._save_dir_key()))
         self.dir_entry = RoundEntry(dir_row, textvariable=self.dir_var, font=f.f_body)
         self.dir_entry.pack(side="left", fill="x", expand=True)
-        PillButton(dir_row, "选择…", command=self.on_choose_dir,
+        PillButton(dir_row, i18n.tr("choose"), command=self.on_choose_dir,
                    font=f.f_btn, width=74, bg_role="CARD").pack(side="left", padx=(10, 0))
 
         # —— 主操作按钮区 ——
         btn_row = TFrame(self, bg_role="BG")
         btn_row.pack(fill="x", pady=(0, 12))
         # 「开始下载」始终可点：未解析时点击会自动先解析再下载
-        self.download_btn = PillButton(btn_row, "开始下载", command=self._on_download_btn,
+        self.download_btn = PillButton(btn_row, i18n.tr("start_download"), command=self._on_download_btn,
                                        primary=True, font=f.f_btn_big, height=46)
         self.download_btn.pack(side="left", fill="x", expand=True)
-        self.cancel_btn = PillButton(btn_row, "取消", command=self.on_cancel,
+        self.cancel_btn = PillButton(btn_row, i18n.tr("cancel"), command=self.on_cancel,
                                      font=f.f_btn, width=88, height=46)
         # 取消按钮仅在下载中/暂停时显示
 
@@ -229,12 +230,12 @@ class VideoPanel(TFrame):
 
         status_row = TFrame(self, bg_role="BG")
         status_row.pack(fill="x", pady=(10, 0))
-        self.open_btn = PillButton(status_row, "打开所在文件夹", command=self.on_open_folder,
+        self.open_btn = PillButton(status_row, i18n.tr("open_folder"), command=self.on_open_folder,
                                    font=f.f_btn, width=130)
         self.open_btn.pack(side="right", padx=(12, 0))
         self.open_btn.configure_state("disabled")
 
-        self._status_full = ("请输入链接并点击「解析」", None)
+        self._status_full = (i18n.tr("enter_link_probe"), None)
         self.status_label = TLabel(status_row, text=self._status_full[0], anchor="w",
                                    font=f.f_sub, bg_role="BG", fg_role="TEXT_SUB")
         self.status_label.pack(side="left", fill="x", expand=True)
@@ -285,11 +286,11 @@ class VideoPanel(TFrame):
         try:
             text = self.clipboard_get()
         except tk.TclError:
-            self._set_status("剪贴板为空", error=True)
+            self._set_status(i18n.tr("clipboard_empty"), error=True)
             return
         url = extract_supported_url(text) or text.strip()
         if not url:
-            self._set_status("剪贴板为空", error=True)
+            self._set_status(i18n.tr("clipboard_empty"), error=True)
             return
         self.url_entry.set(url)
         if extract_supported_url(url) and not self._busy:
@@ -300,7 +301,7 @@ class VideoPanel(TFrame):
         if self._busy:
             return
         self.url_entry.set(url)
-        self._set_status("已从剪贴板填入链接，正在解析…")
+        self._set_status(i18n.tr("clipboard_probe"))
         self.on_probe()
 
     def on_probe(self):
@@ -308,13 +309,13 @@ class VideoPanel(TFrame):
             return
         url = self.url_entry.get().strip()
         if not url:
-            self._set_status("请输入视频链接", error=True)
+            self._set_status(i18n.tr("enter_video_link"), error=True)
             return
 
         self._busy = True
         self.probe_btn.configure_state("disabled")
         self.download_btn.configure_state("disabled")
-        self._set_status("正在解析链接…")
+        self._set_status(i18n.tr("probing"))
 
         def work():
             try:
@@ -322,7 +323,7 @@ class VideoPanel(TFrame):
             except core.DownloadError as exc:
                 self.after(0, self._probe_failed, str(exc))
             except Exception as exc:
-                self.after(0, self._probe_failed, f"解析失败：{exc}")
+                self.after(0, self._probe_failed, i18n.tr("probe_failed", message=exc))
             else:
                 self.after(0, self._probe_done, info)
 
@@ -355,7 +356,7 @@ class VideoPanel(TFrame):
         self.quality_select.set_values(values)
         self.quality_var.set(values[0])
         self._on_mode_change()
-        self._set_status("解析成功，请选择选项后点击「开始下载」", ok=True)
+        self._set_status(i18n.tr("probe_success_video"), ok=True)
 
     def _height_for_label(self, label):
         if not self._info:
@@ -373,9 +374,9 @@ class VideoPanel(TFrame):
         if url != self._info.url:
             self._info = None
             self.quality_select.set_values([])
-            self.quality_var.set("请先解析链接")
+            self.quality_var.set(i18n.tr("probe_first"))
             self.title_label.configure(text="")
-            self._set_status("链接已变更，点击「解析」或直接「开始下载」（会自动解析）")
+            self._set_status(i18n.tr("url_changed"))
 
     def _on_download_btn(self):
         if self._paused:
@@ -390,7 +391,7 @@ class VideoPanel(TFrame):
             return
         if not self._pause_event.is_set() and not self._cancel_event.is_set():
             self._pause_event.set()
-            self._set_status("正在暂停下载…")
+            self._set_status(i18n.tr("pausing"))
 
     def on_resume(self):
         if not self._paused or not self._dl_params:
@@ -410,14 +411,14 @@ class VideoPanel(TFrame):
             return
         if not self._cancel_event.is_set():
             self._cancel_event.set()
-            self._set_status("正在取消下载…")
+            self._set_status(i18n.tr("cancelling"))
 
     def on_download(self):
         if self._busy:
             return
         url = self.url_entry.get().strip()
         if not url:
-            self._set_status("请输入视频链接", error=True)
+            self._set_status(i18n.tr("enter_video_link"), error=True)
             return
         # 未解析、或链接已变更（解析结果与输入不一致）时：先自动解析，
         # 成功后用解析出的最高档位继续下载，避免用旧视频的档位下错视频
@@ -445,7 +446,7 @@ class VideoPanel(TFrame):
         self._info = None
         self.probe_btn.configure_state("disabled")
         self.download_btn.configure_state("disabled")
-        self._set_status("正在解析链接，完成后自动开始下载…")
+        self._set_status(i18n.tr("auto_probing"))
 
         def work():
             try:
@@ -453,7 +454,7 @@ class VideoPanel(TFrame):
             except core.DownloadError as exc:
                 self.after(0, self._probe_failed, str(exc))
             except Exception as exc:
-                self.after(0, self._probe_failed, f"解析失败：{exc}")
+                self.after(0, self._probe_failed, i18n.tr("probe_failed", message=exc))
             else:
                 self.after(0, self._auto_probe_done, info)
 
@@ -472,10 +473,10 @@ class VideoPanel(TFrame):
         self._pause_event = threading.Event()
         cancel_event = self._cancel_event
         pause_event = self._pause_event
-        self.download_btn.set_text("暂停下载")
+        self.download_btn.set_text(i18n.tr("pause_download"))
         self.cancel_btn.pack(side="left", padx=(10, 0))
         self.probe_btn.configure_state("disabled")
-        self._set_status("正在继续下载…" if resume else "正在开始下载…")
+        self._set_status(i18n.tr("resuming" if resume else "starting"))
 
         def on_progress(percent, speed_text, eta_text, status):
             def update():
@@ -483,15 +484,16 @@ class VideoPanel(TFrame):
                     return
                 if status == "merging":
                     self.progress.set(100)
-                    self._set_status("下载完成，正在合并/转码…")
+                    self._set_status(i18n.tr("merging"))
                 else:
                     if percent is not None:
                         self._last_percent = percent
                         self.progress.set(percent)
-                        self._set_status(
-                            f"下载中 {percent:.1f}%  ·  速度 {speed_text}  ·  剩余 {eta_text}")
+                        self._set_status(i18n.tr(
+                            "downloading_percent", percent=percent,
+                            speed=speed_text, eta=eta_text))
                     else:
-                        self._set_status(f"下载中…  ·  速度 {speed_text}")
+                        self._set_status(i18n.tr("downloading", speed=speed_text))
             self.after(0, update)
 
         def work():
@@ -514,7 +516,7 @@ class VideoPanel(TFrame):
             except core.DownloadError as exc:
                 self.after(0, self._download_failed, str(exc))
             except Exception as exc:
-                self.after(0, self._download_failed, f"下载失败：{exc}")
+                self.after(0, self._download_failed, i18n.tr("download_failed", message=exc))
             else:
                 self.after(0, self._download_done, path)
 
@@ -528,8 +530,8 @@ class VideoPanel(TFrame):
         self._downloading = False
         self._paused = True
         self._partial_files = partial_files
-        self.download_btn.set_text("继续下载")
-        self._set_status(f"已暂停，已下载 {self._last_percent:.1f}%")
+        self.download_btn.set_text(i18n.tr("resume_download"))
+        self._set_status(i18n.tr("paused_at", percent=self._last_percent))
 
     def _reset_after_download(self):
         self._busy = False
@@ -538,7 +540,7 @@ class VideoPanel(TFrame):
         self._cancel_event = None
         self._pause_event = None
         self._partial_files = None
-        self.download_btn.set_text("开始下载")
+        self.download_btn.set_text(i18n.tr("start_download"))
         self.download_btn.configure_state("normal")
         self.cancel_btn.pack_forget()
         self.probe_btn.configure_state("normal")
@@ -546,7 +548,7 @@ class VideoPanel(TFrame):
     def _download_cancelled(self):
         self._reset_after_download()
         self.progress.set(0)
-        self._set_status("已取消下载，临时文件已清理")
+        self._set_status(i18n.tr("cancelled_cleaned"))
 
     def _download_failed(self, msg):
         self._reset_after_download()
@@ -558,7 +560,7 @@ class VideoPanel(TFrame):
         self._last_file = path
         self.open_btn.configure_state("normal")
         self.progress.set(0)
-        self._set_status("下载完成：", ok=True, filename=os.path.basename(path))
+        self._set_status(i18n.tr("download_complete"), ok=True, filename=os.path.basename(path))
 
     def on_open_folder(self):
         open_in_file_manager(self._last_file)
@@ -596,15 +598,15 @@ class ImagePanel(TFrame):
         b1 = card1.body
         row = TFrame(b1, bg_role="CARD")
         row.pack(fill="x", pady=(4, 0))
-        TLabel(row, text="帖子链接", font=f.f_section, bg_role="CARD",
+        TLabel(row, text=i18n.tr("post_link"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(side="left", padx=(0, 10))
         self.url_entry = RoundEntry(row, font=f.f_body)
         self.url_entry.pack(side="left", fill="x", expand=True)
         self.url_entry.entry.bind("<Return>", lambda e: self.on_probe())
-        self.paste_btn = PillButton(row, "粘贴", command=self.on_paste,
+        self.paste_btn = PillButton(row, i18n.tr("paste"), command=self.on_paste,
                                     font=f.f_btn, width=68, bg_role="CARD")
         self.paste_btn.pack(side="left", padx=(10, 0))
-        self.probe_btn = PillButton(row, "解析", command=self.on_probe,
+        self.probe_btn = PillButton(row, i18n.tr("probe"), command=self.on_probe,
                                     font=f.f_btn, width=68, bg_role="CARD")
         self.probe_btn.pack(side="left", padx=(8, 0))
 
@@ -614,17 +616,17 @@ class ImagePanel(TFrame):
         b2 = card2.body
         head = TFrame(b2, bg_role="CARD")
         head.pack(fill="x")
-        TLabel(head, text="图片选择", font=f.f_section, bg_role="CARD",
+        TLabel(head, text=i18n.tr("image_selection"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(side="left")
         self.count_label = TLabel(head, text="", font=f.f_small, bg_role="CARD",
                                   fg_role="TEXT_SUB")
         self.count_label.pack(side="right")
         self.all_var = tk.BooleanVar(value=True)
-        self.all_check = CheckPill(head, "全选", self.all_var,
+        self.all_check = CheckPill(head, i18n.tr("select_all"), self.all_var,
                                    command=self._on_all_toggle, font=f.f_btn, width=70)
         self.all_check.pack(side="right", padx=(0, 12))
 
-        self.post_label = TLabel(b2, text="解析后在此选择要下载的图片", anchor="w",
+        self.post_label = TLabel(b2, text=i18n.tr("select_images_hint"), anchor="w",
                                  font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB")
         self.post_label.pack(anchor="w", fill="x", pady=(6, 4))
 
@@ -638,22 +640,22 @@ class ImagePanel(TFrame):
         b3 = card3.body
         dir_row = TFrame(b3, bg_role="CARD")
         dir_row.pack(fill="x", pady=(4, 0))
-        TLabel(dir_row, text="保存位置", font=f.f_section, bg_role="CARD",
+        TLabel(dir_row, text=i18n.tr("save_location"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(side="left", padx=(0, 10))
         self.dir_var = tk.StringVar(value=self.app.default_save_dir(self._save_dir_key()))
         self.dir_entry = RoundEntry(dir_row, textvariable=self.dir_var, font=f.f_body)
         self.dir_entry.pack(side="left", fill="x", expand=True)
-        PillButton(dir_row, "选择…", command=self.on_choose_dir,
+        PillButton(dir_row, i18n.tr("choose"), command=self.on_choose_dir,
                    font=f.f_btn, width=74, bg_role="CARD").pack(side="left", padx=(10, 0))
 
         # —— 操作按钮 + 进度 ——
         btn_row = TFrame(self, bg_role="BG")
         btn_row.pack(fill="x", pady=(0, 12))
-        self.download_btn = PillButton(btn_row, "下载选中图片", command=self.on_download,
+        self.download_btn = PillButton(btn_row, i18n.tr("download_selected_images"), command=self.on_download,
                                        primary=True, font=f.f_btn_big, height=46)
         self.download_btn.pack(side="left", fill="x", expand=True)
         self.download_btn.configure_state("disabled")
-        self.cancel_btn = PillButton(btn_row, "取消", command=self.on_cancel,
+        self.cancel_btn = PillButton(btn_row, i18n.tr("cancel"), command=self.on_cancel,
                                      font=f.f_btn, width=88, height=46)
 
         self.progress = RoundProgress(self)
@@ -661,11 +663,11 @@ class ImagePanel(TFrame):
 
         status_row = TFrame(self, bg_role="BG")
         status_row.pack(fill="x", pady=(10, 0))
-        self.open_btn = PillButton(status_row, "打开所在文件夹", command=self.on_open_folder,
+        self.open_btn = PillButton(status_row, i18n.tr("open_folder"), command=self.on_open_folder,
                                    font=f.f_btn, width=130)
         self.open_btn.pack(side="right", padx=(12, 0))
         self.open_btn.configure_state("disabled")
-        self._status_full = "请输入帖子链接并点击「解析」"
+        self._status_full = i18n.tr("enter_link_probe")
         self.status_label = TLabel(status_row, text=self._status_full, anchor="w",
                                    font=f.f_sub, bg_role="BG", fg_role="TEXT_SUB")
         self.status_label.pack(side="left", fill="x", expand=True)
@@ -699,11 +701,11 @@ class ImagePanel(TFrame):
         try:
             text = self.clipboard_get()
         except tk.TclError:
-            self._set_status("剪贴板为空", error=True)
+            self._set_status(i18n.tr("clipboard_empty"), error=True)
             return
         url = extract_supported_url(text) or text.strip()
         if not url:
-            self._set_status("剪贴板为空", error=True)
+            self._set_status(i18n.tr("clipboard_empty"), error=True)
             return
         self.url_entry.set(url)
         if extract_supported_url(url) and not self._busy:
@@ -713,7 +715,7 @@ class ImagePanel(TFrame):
         if self._busy:
             return
         self.url_entry.set(url)
-        self._set_status("已从剪贴板填入链接，正在解析…")
+        self._set_status(i18n.tr("clipboard_probe"))
         self.on_probe()
 
     def _on_all_toggle(self):
@@ -722,7 +724,7 @@ class ImagePanel(TFrame):
     def _on_selection_change(self):
         n = len(self.picker.selected_indices())
         total = len(self._post.items) if self._post else 0
-        self.count_label.configure(text=f"已选 {n}/{total} 张")
+        self.count_label.configure(text=i18n.tr("selected_count", n=n, total=total))
         self.all_var.set(n == total and total > 0)
         self.all_check.refresh()
         if not self._downloading:
@@ -733,13 +735,13 @@ class ImagePanel(TFrame):
             return
         url = self.url_entry.get().strip()
         if not url:
-            self._set_status("请输入帖子链接", error=True)
+            self._set_status(i18n.tr("enter_post_link"), error=True)
             return
         self._busy = True
         self._thumb_epoch += 1
         self.probe_btn.configure_state("disabled")
         self.download_btn.configure_state("disabled")
-        self._set_status("正在解析帖子中的图片…")
+        self._set_status(i18n.tr("probing_images"))
 
         def work():
             try:
@@ -747,7 +749,7 @@ class ImagePanel(TFrame):
             except images.ImageError as exc:
                 self.after(0, self._probe_failed, str(exc))
             except Exception as exc:
-                self.after(0, self._probe_failed, f"解析失败：{exc}")
+                self.after(0, self._probe_failed, i18n.tr("images_probe_failed", message=exc))
             else:
                 self.after(0, self._probe_done, post)
 
@@ -767,13 +769,13 @@ class ImagePanel(TFrame):
         if post.title:
             desc = f"{desc}  ·  {post.title}" if desc else post.title
         self.post_label.set_fg_role("TEXT")
-        self.post_label.configure(text=desc or "（无文字内容）")
+        self.post_label.configure(text=desc or i18n.tr("no_text"))
 
         items = []
         for it in post.items:
             sub = it.size_text + (f" · {it.extension.upper()}" if it.extension else "")
             items.append({
-                "label": f"图 {it.index}",
+                "label": i18n.tr("image_label", index=it.index),
                 "sub": sub.strip(" ·"),
                 "selected": True,
                 "photo": None,
@@ -782,7 +784,7 @@ class ImagePanel(TFrame):
         self.picker.set_items(items)
         self.all_var.set(True)
         self._on_selection_change()
-        self._set_status(f"解析成功，共 {len(post.items)} 张图片（原图画质）", ok=True)
+        self._set_status(i18n.tr("probe_success_images", n=len(post.items)), ok=True)
         self._load_thumbnails(post)
 
     def _load_thumbnails(self, post):
@@ -819,7 +821,7 @@ class ImagePanel(TFrame):
             return
         sel = [self._post.items[i] for i in self.picker.selected_indices()]
         if not sel:
-            self._set_status("请先勾选要下载的图片", error=True)
+            self._set_status(i18n.tr("select_images_error"), error=True)
             return
         self._busy = True
         self._downloading = True
@@ -834,7 +836,7 @@ class ImagePanel(TFrame):
         self.cancel_btn.pack(side="left", padx=(10, 0))
         self.probe_btn.configure_state("disabled")
         self.progress.set(0)
-        self._set_status(f"开始下载 {len(sel)} 张图片…")
+        self._set_status(i18n.tr("start_image_download", n=len(sel)))
 
         def on_progress(percent, text):
             def update():
@@ -854,7 +856,7 @@ class ImagePanel(TFrame):
             except images.ImageError as exc:
                 self.after(0, self._download_failed, str(exc))
             except Exception as exc:
-                self.after(0, self._download_failed, f"下载失败：{exc}")
+                self.after(0, self._download_failed, i18n.tr("images_download_failed", message=exc))
             else:
                 self.after(0, self._download_done, paths)
 
@@ -864,7 +866,7 @@ class ImagePanel(TFrame):
         if self._downloading and self._cancel_event is not None \
                 and not self._cancel_event.is_set():
             self._cancel_event.set()
-            self._set_status("正在取消下载…")
+            self._set_status(i18n.tr("cancelling"))
 
     def _reset_after_download(self):
         self._busy = False
@@ -878,7 +880,8 @@ class ImagePanel(TFrame):
         done = len(self._last_paths)
         self._reset_after_download()
         self.progress.set(0)
-        self._set_status("已取消图片下载" + (f"（已完成 {done} 张保留）" if done else ""))
+        suffix = i18n.tr("completed_images_kept", done=done) if done else ""
+        self._set_status(i18n.tr("cancelled_images") + suffix)
 
     def _download_failed(self, msg):
         self._reset_after_download()
@@ -890,7 +893,8 @@ class ImagePanel(TFrame):
         self._reset_after_download()
         self.progress.set(0)
         self.open_btn.configure_state("normal")
-        self._set_status(f"已下载 {len(paths)} 张图片到 {os.path.basename(os.path.dirname(paths[0]))}/",
+        self._set_status(i18n.tr("images_complete", n=len(paths),
+                                 folder=os.path.basename(os.path.dirname(paths[0]))),
                          ok=True)
 
     def on_open_folder(self):
@@ -940,7 +944,8 @@ class MediaPlatformPage(TFrame):
         PageHeader(head_row, app, title, subtitle).pack(side="left")
         self.kind_var = tk.StringVar(value="video")
         self.kind_seg = SegmentedControl(
-            head_row, [("视频", "video"), ("图片", "image")], self.kind_var,
+            head_row, [(i18n.tr("video_segment"), "video"),
+                       (i18n.tr("image_segment"), "image")], self.kind_var,
             command=self._on_kind_change, font=app.f_btn, width=176, bg_role="BG")
         self.kind_seg.pack(side="right", pady=(6, 0))
 
@@ -984,21 +989,42 @@ class SettingsPage(TFrame):
         super().__init__(master, bg_role="BG")
         self.app = app
         f = app
-        PageHeader(self, app, "设置", "外观与下载偏好，修改后自动保存").pack(
+        self._scroll_canvas = tk.Canvas(
+            self, bg=theme.C().BG, highlightthickness=0, bd=0)
+        self._scrollbar = tk.Scrollbar(self, orient="vertical",
+                                       command=self._scroll_canvas.yview)
+        self._scroll_canvas.configure(yscrollcommand=self._scrollbar.set)
+        self._scroll_canvas.pack(side="left", fill="both", expand=True)
+        self._scrollbar.pack(side="right", fill="y")
+        self._scroll_body = TFrame(self._scroll_canvas, bg_role="BG")
+        self._scroll_window = self._scroll_canvas.create_window(
+            (0, 0), window=self._scroll_body, anchor="nw")
+        self._scroll_body.bind(
+            "<Configure>",
+            lambda e: self._scroll_canvas.configure(
+                scrollregion=self._scroll_canvas.bbox("all")))
+        self._scroll_canvas.bind(
+            "<Configure>",
+            lambda e: self._scroll_canvas.itemconfigure(
+                self._scroll_window, width=e.width))
+
+        PageHeader(self._scroll_body, app, i18n.tr("settings"), i18n.tr("settings_subtitle")).pack(
             fill="x", pady=(0, 14))
 
         # —— 外观 ——
-        card1 = GlassCard(self)
+        card1 = GlassCard(self._scroll_body)
         card1.set_height(112)
         card1.pack(fill="x", pady=(0, 12))
         b1 = card1.body
-        TLabel(b1, text="外观主题", font=f.f_section, bg_role="CARD",
+        TLabel(b1, text=i18n.tr("theme"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
         row1 = TFrame(b1, bg_role="CARD")
         row1.pack(fill="x", pady=(10, 0))
         self.theme_var = tk.StringVar(value=theme.mode())
         self.theme_seg = SegmentedControl(
-            row1, theme.MODES, self.theme_var,
+            row1, [(i18n.tr("system_theme"), "system"),
+                   (i18n.tr("light_theme"), "light"),
+                   (i18n.tr("dark_theme"), "dark")], self.theme_var,
             command=self._on_theme_change, font=f.f_btn, width=300)
         self.theme_seg.pack(side="left")
         self.theme_hint = TLabel(row1, text="", font=f.f_small, bg_role="CARD",
@@ -1006,34 +1032,56 @@ class SettingsPage(TFrame):
         self.theme_hint.pack(side="left", padx=(16, 0))
         self._update_theme_hint()
 
+        # —— 界面语言 ——
+        card_language = GlassCard(self._scroll_body)
+        card_language.set_height(104)
+        card_language.pack(fill="x", pady=(0, 12))
+        language_body = card_language.body
+        TLabel(language_body, text=i18n.tr("language"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        language_row = TFrame(language_body, bg_role="CARD")
+        language_row.pack(fill="x", pady=(8, 0))
+        current_language = app.settings.get("language", "zh_CN")
+        current_language = current_language if current_language in dict(i18n.LANGUAGES) else "zh_CN"
+        current_language_name = dict(i18n.LANGUAGES)[current_language]
+        self.language_var = tk.StringVar(value=current_language_name)
+        self.language_select = PillSelect(
+            language_row, self.language_var,
+            values=[name for name, _ in i18n.language_options()],
+            font=f.f_btn, width=170)
+        self.language_select.pack(side="left")
+        self.language_var.trace_add("write", lambda *a: self._on_language_change())
+        TLabel(language_row, text=i18n.tr("language_hint"), font=f.f_small,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(16, 0))
+
         # —— 应用图标 ——
-        card_logo = GlassCard(self)
+        card_logo = GlassCard(self._scroll_body)
         card_logo.set_height(216)
         card_logo.pack(fill="x", pady=(0, 12))
         bl = card_logo.body
-        TLabel(bl, text="应用图标", font=f.f_section, bg_role="CARD",
+        TLabel(bl, text=i18n.tr("app_logo"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
         logo_row = TFrame(bl, bg_role="CARD")
         logo_row.pack(anchor="w", pady=(10, 0))
         self._logo_swatches = {}
         current = app.current_logo()
-        for key, label in LOGO_OPTIONS:
-            sw = LogoSwatch(logo_row, label, self._load_logo_thumb(key),
+        for key, label_key in LOGO_OPTIONS:
+            sw = LogoSwatch(logo_row, i18n.tr(label_key), self._load_logo_thumb(key),
                             command=lambda k=key: self._on_logo_select(k),
                             font=f.f_small)
             sw.pack(side="left", padx=(0, 12))
             sw.set_selected(key == current)
             self._logo_swatches[key] = sw
-        TLabel(bl, text="Dock 与窗口图标立即生效，Finder 中 .app 的图标保持默认。",
+        TLabel(bl, text=i18n.tr("logo_hint"),
                font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB",
                anchor="w", justify="left").pack(anchor="w", fill="x", pady=(10, 0))
 
         # —— 默认保存位置 ——
-        card2 = GlassCard(self)
+        card2 = GlassCard(self._scroll_body)
         card2.set_height(104)
         card2.pack(fill="x", pady=(0, 12))
         b2 = card2.body
-        TLabel(b2, text="默认保存位置（各下载方式未单独设置时使用）", font=f.f_section,
+        TLabel(b2, text=i18n.tr("default_save"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         row2 = TFrame(b2, bg_role="CARD")
         row2.pack(fill="x", pady=(8, 0))
@@ -1041,31 +1089,30 @@ class SettingsPage(TFrame):
         self.dir_var.trace_add("write", lambda *a: self._on_dir_change())
         RoundEntry(row2, textvariable=self.dir_var, font=f.f_body).pack(
             side="left", fill="x", expand=True)
-        PillButton(row2, "选择…", command=self._choose_dir,
+        PillButton(row2, i18n.tr("choose"), command=self._choose_dir,
                    font=f.f_btn, width=74, bg_role="CARD").pack(side="left", padx=(10, 0))
 
         # —— 登录 Cookie ——
-        card3 = GlassCard(self)
+        card3 = GlassCard(self._scroll_body)
         card3.set_height(150)
         card3.pack(fill="x", pady=(0, 12))
         b3 = card3.body
-        TLabel(b3, text="浏览器 Cookie（用于需要登录的内容）", font=f.f_section,
+        TLabel(b3, text=i18n.tr("browser_cookie"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         row3 = TFrame(b3, bg_role="CARD")
         row3.pack(fill="x", pady=(10, 0))
-        self._cookie_options = [("不使用", ""), ("Chrome", "chrome"),
+        self._cookie_options = [(i18n.tr("no_cookie"), ""), ("Chrome", "chrome"),
                                 ("Safari", "safari"), ("Firefox", "firefox"),
                                 ("Edge", "edge")]
         cur = app.settings.get("browser_cookies", "")
-        cur_label = next((l for l, v in self._cookie_options if v == cur), "不使用")
+        cur_label = next((l for l, v in self._cookie_options if v == cur), i18n.tr("no_cookie"))
         self.cookie_var = tk.StringVar(value=cur_label)
         self.cookie_var.trace_add("write", lambda *a: self._on_cookie_change())
         self.cookie_select = PillSelect(row3, self.cookie_var,
                                         values=[l for l, _ in self._cookie_options],
                                         font=f.f_btn, width=150)
         self.cookie_select.pack(side="left")
-        TLabel(b3, text="Instagram 已封锁匿名访问：选择已登录 Instagram 的浏览器后，"
-                        "解析与下载会携带其 Cookie。\n不需要时请保持「不使用」。",
+        TLabel(b3, text=i18n.tr("cookie_hint"),
                font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB",
                anchor="w", justify="left").pack(anchor="w", fill="x", pady=(10, 0))
 
@@ -1091,8 +1138,8 @@ class SettingsPage(TFrame):
 
     def _update_theme_hint(self):
         if theme.mode() == "system":
-            cur = "深色" if theme.is_dark() else "浅色"
-            self.theme_hint.configure(text=f"当前系统外观：{cur}")
+            cur = i18n.tr("dark_theme" if theme.is_dark() else "light_theme")
+            self.theme_hint.configure(text=i18n.tr("system_appearance", cur=cur))
         else:
             self.theme_hint.configure(text="")
 
@@ -1116,6 +1163,12 @@ class SettingsPage(TFrame):
         core.set_browser_cookies(value)
         images.set_browser_cookies(value)
 
+    def _on_language_change(self):
+        name = self.language_var.get()
+        code = next((code for label, code in i18n.language_options()
+                     if label == name), i18n.language())
+        self.app.set_language(code)
+
 
 # ====================================================================
 # 主窗口
@@ -1137,11 +1190,12 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.settings = settings.load()
+        i18n.set_language(self.settings.get("language", "zh_CN"))
         theme.set_mode(self.settings.get("theme", "system"))
         core.set_browser_cookies(self.settings.get("browser_cookies", ""))
         images.set_browser_cookies(self.settings.get("browser_cookies", ""))
 
-        self.title("多平台下载器 — YouTube / X / Instagram / 抖音 / 哔哩哔哩")
+        self.title(i18n.tr("app_title"))
         self.geometry("1020x745")
         self.minsize(920, 700)
         self.configure(bg=theme.C().BG)
@@ -1312,10 +1366,10 @@ class App(tk.Tk):
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
-        TLabel(self.sidebar, text="下载中心", font=self.f_side_title,
+        TLabel(self.sidebar, text=i18n.tr("download_center"), font=self.f_side_title,
                bg_role="SIDEBAR_BG", fg_role="SIDEBAR_TEXT_ACTIVE").pack(
             anchor="w", padx=18, pady=(22, 2))
-        TLabel(self.sidebar, text="多平台音视频 / 图片", font=self.f_small,
+        TLabel(self.sidebar, text=i18n.tr("media_subtitle"), font=self.f_small,
                bg_role="SIDEBAR_BG", fg_role="SIDEBAR_TEXT").pack(
             anchor="w", padx=18, pady=(0, 16))
 
@@ -1327,34 +1381,32 @@ class App(tk.Tk):
 
         self.pages = {
             "youtube": VideoPlatformPage(
-                self.page_holder, self, "YouTube",
-                "下载视频（可选清晰度）或仅音频 MP3", platform="YouTube"),
+                self.page_holder, self, i18n.tr("youtube_title"),
+                i18n.tr("youtube_subtitle"), platform="YouTube"),
             "x": MediaPlatformPage(
-                self.page_holder, self, "X (Twitter)", "下载推文中的视频或原图画质图片",
+                self.page_holder, self, i18n.tr("x_title"), i18n.tr("x_subtitle"),
                 platform="X"),
             "instagram": MediaPlatformPage(
-                self.page_holder, self, "Instagram", "下载帖子中的视频或图片",
+                self.page_holder, self, i18n.tr("instagram_title"), i18n.tr("instagram_subtitle"),
                 platform="Instagram",
-                hint="提示：Instagram 已封锁匿名访问，公开帖子通常也需要登录。"
-                     "可在「设置」中选择已登录的浏览器 Cookie。"),
+                hint=i18n.tr("instagram_hint")),
             "douyin": VideoPlatformPage(
-                self.page_holder, self, "抖音 Douyin",
-                "下载抖音视频（音视频同轨）或仅音频 MP3", platform="抖音",
-                hint="提示：抖音视频通常为单一清晰度档位。若被风控/需要登录，"
-                     "可在「设置」中选择已登录抖音的浏览器 Cookie。"),
+                self.page_holder, self, i18n.tr("douyin_title"),
+                i18n.tr("douyin_subtitle"), platform="抖音",
+                hint=i18n.tr("douyin_hint")),
             "bilibili": VideoPlatformPage(
-                self.page_holder, self, "哔哩哔哩 Bilibili",
-                "下载 B 站视频（DASH 流自动合并）或仅音频 MP3", platform="哔哩哔哩",
-                hint="提示：1080P+/4K 等高清晰度需要登录大会员，匿名最高 1080P。"
-                     "可在「设置」中选择已登录的浏览器 Cookie。"),
+                self.page_holder, self, i18n.tr("bilibili_title"),
+                i18n.tr("bilibili_subtitle"), platform="哔哩哔哩",
+                hint=i18n.tr("bilibili_hint")),
             "settings": SettingsPage(self.page_holder, self),
         }
 
         self.nav_items = {}
-        nav_defs = [("youtube", "YouTube", "youtube"), ("x", "X (Twitter)", "x"),
-                    ("instagram", "Instagram", "instagram"),
-                    ("douyin", "抖音", "douyin"),
-                    ("bilibili", "哔哩哔哩", "bilibili")]
+        nav_defs = [("youtube", i18n.tr("youtube_nav"), "youtube"),
+                    ("x", i18n.tr("x_nav"), "x"),
+                    ("instagram", i18n.tr("instagram_nav"), "instagram"),
+                    ("douyin", i18n.tr("douyin_nav"), "douyin"),
+                    ("bilibili", i18n.tr("bilibili_nav"), "bilibili")]
         for key, label, icon in nav_defs:
             item = SidebarItem(self.sidebar, label, icon,
                                command=lambda k=key: self.show_page(k),
@@ -1363,13 +1415,34 @@ class App(tk.Tk):
             self.nav_items[key] = item
 
         # 设置入口固定在侧边栏底部
-        settings_item = SidebarItem(self.sidebar, "设置", "settings",
+        settings_item = SidebarItem(self.sidebar, i18n.tr("settings"), "settings",
                                     command=lambda: self.show_page("settings"),
                                     font=self.f_side)
         settings_item.pack(side="bottom", padx=12, pady=14)
         self.nav_items["settings"] = settings_item
 
         self.current_page = None
+
+    def set_language(self, code):
+        """保存语言并重建静态界面；下载进行中时不破坏当前任务。"""
+        if code == i18n.language():
+            return
+        if any(getattr(panel, "_busy", False)
+               for panel in self._all_panels()):
+            messagebox.showinfo(i18n.tr("language"), i18n.tr("language_busy"), parent=self)
+            return
+        current_page = self.current_page or "youtube"
+        i18n.set_language(code)
+        self.settings["language"] = i18n.language()
+        settings.save(self.settings)
+        self.title(i18n.tr("app_title"))
+        if self.menubar is not None:
+            self.menubar.update_language()
+        for child in (getattr(self, "sidebar", None), getattr(self, "content", None)):
+            if child is not None:
+                child.destroy()
+        self._build_layout()
+        self.show_page(current_page)
 
     def show_page(self, key):
         if key == self.current_page:
@@ -1414,12 +1487,12 @@ class App(tk.Tk):
         for p in self._all_panels():
             if isinstance(p, VideoPanel):
                 if p._downloading:
-                    return f"下载中 {p._last_percent:.0f}%"
+                    return i18n.tr("downloading_status", percent=p._last_percent)
                 if p._paused:
-                    return f"已暂停 {p._last_percent:.0f}%"
+                    return i18n.tr("paused_status", percent=p._last_percent)
             elif isinstance(p, ImagePanel) and p._downloading:
-                return "下载图片中"
-        return "空闲"
+                return i18n.tr("downloading_images_status")
+        return i18n.tr("idle")
 
     def _poll_menubar(self):
         """轮询 menubar 菜单点击产生的动作（show / quit）。"""
@@ -1447,8 +1520,7 @@ class App(tk.Tk):
         if active:
             self.show_main_window()
             if not messagebox.askyesno(
-                    "退出", "有下载正在进行，退出将取消下载并清理临时文件。\n"
-                    "确定退出吗？", parent=self):
+                    i18n.tr("quit"), i18n.tr("quit_confirm"), parent=self):
                 return
             for p in active:
                 p.on_cancel()

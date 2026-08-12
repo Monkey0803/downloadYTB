@@ -15,6 +15,7 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - Remember the last directory separately for each download mode. Video, audio-only, and image downloads do not overwrite one another's directory settings.
 - Detect supported links from the clipboard, switch to the matching platform page, and start probing when the app regains focus.
 - System, light, and dark themes.
+- Simplified Chinese, Traditional Chinese, English, Korean, and Japanese UI languages; the selection is persisted in Settings.
 - A macOS status-bar item plus runtime Dock/window logo switching. macOS-only menu-bar code is disabled on Windows and Linux.
 - ffmpeg is supplied through imageio-ffmpeg; a separate ffmpeg installation is normally unnecessary.
 
@@ -153,6 +154,9 @@ git diff --check
 ~~~bash
 # Basic window and platform pages
 .venv/bin/python test_smoke_ui.py
+
+# Translation resource completeness (five languages)
+.venv/bin/python test_i18n.py
 
 # Directory synchronization, per-mode directories, and restart persistence
 .venv/bin/python test_save_dir_sync.py

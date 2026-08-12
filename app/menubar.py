@@ -25,6 +25,8 @@ Fatal Error（SIGABRT，已在打包后的 .app 实测复现）。
 
 import sys
 
+from . import i18n
+
 _AVAILABLE = False
 if sys.platform == "darwin":
     try:
@@ -117,19 +119,19 @@ if _AVAILABLE:
             menu.setDelegate_(self._delegate)
 
             self._status_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "空闲", None, "")
+                i18n.tr("idle"), None, "")
             self._status_mi.setEnabled_(False)
             menu.addItem_(self._status_mi)
             menu.addItem_(NSMenuItem.separatorItem())
 
             show_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "显示主窗口", b"showWindow:", "")
+                i18n.tr("show_window"), b"showWindow:", "")
             show_mi.setTarget_(self._delegate)
             menu.addItem_(show_mi)
             menu.addItem_(NSMenuItem.separatorItem())
 
             quit_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "退出", b"quitApp:", "")
+                i18n.tr("quit"), b"quitApp:", "")
             quit_mi.setTarget_(self._delegate)
             menu.addItem_(quit_mi)
 
@@ -140,12 +142,20 @@ if _AVAILABLE:
             req, self.pending = self.pending, None
             return req
 
+        def update_language(self):
+            """刷新菜单项文案；只在 Tk 主线程调用。"""
+            self._status_mi.setTitle_(i18n.tr("idle"))
+            menu = self._item.menu()
+            if menu is not None and menu.numberOfItems() >= 4:
+                menu.itemAtIndex_(2).setTitle_(i18n.tr("show_window"))
+                menu.itemAtIndex_(4).setTitle_(i18n.tr("quit"))
+
         def refresh_status(self):
             """菜单弹出时刷新只读状态项（只读取纯 Python 状态，不碰 Tk）。"""
             try:
                 text = self.app.menubar_status_text()
             except Exception:
-                text = "空闲"
+                text = i18n.tr("idle")
             self._status_mi.setTitle_(text)
 
         def remove(self):

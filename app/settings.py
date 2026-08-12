@@ -11,6 +11,7 @@ import sys
 
 DEFAULTS = {
     "theme": "system",        # system / light / dark
+    "language": "zh_CN",      # zh_CN / zh_TW / en / ko / ja
     "save_dir": "",           # 空表示使用 ~/Downloads
     "save_dirs": {},           # 按平台 + 下载类型记录的保存目录
     "browser_cookies": "",    # 空表示不读取浏览器 Cookie；可选 chrome/safari/firefox/edge

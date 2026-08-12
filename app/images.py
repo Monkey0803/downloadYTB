@@ -14,6 +14,7 @@ from typing import Callable, List, Optional
 
 import requests
 
+from . import i18n
 from gallery_dl import config as gdl_config
 from gallery_dl import job as gdl_job
 
@@ -84,26 +85,23 @@ def _probe_error(name: str, msg: str, url: str) -> ImageError:
     if "login" in low or "authrequired" in name.lower() or "authenticated" in low \
             or "authorization" in low:
         if is_ig:
-            return ImageError(
-                "Instagram 要求登录才能访问该帖子（平台已封锁匿名访问）。"
-                "可在「设置」中选择浏览器 Cookie 后重试")
-        return ImageError(
-            "该内容需要登录才能访问，可在「设置」中选择浏览器 Cookie 后重试")
+            return ImageError(i18n.tr("error_images_login_instagram"))
+        return ImageError(i18n.tr("error_images_login"))
     if "404" in msg or "notfound" in name.lower() or "not found" in low:
-        return ImageError("帖子不存在或已被删除")
+        return ImageError(i18n.tr("error_post_missing"))
     if any(k in low for k in ("timed out", "timeout", "connection", "getaddrinfo",
                               "network", "unreachable")):
-        return ImageError("网络请求失败，请检查网络连接后重试")
+        return ImageError(i18n.tr("error_network"))
     if "nomatch" in name.lower() or "unsupported" in low:
-        return ImageError("不支持的链接，请输入 X 或 Instagram 帖子链接")
-    return ImageError(f"解析失败：{name}: {msg[:160]}")
+        return ImageError(i18n.tr("error_image_url"))
+    return ImageError(i18n.tr("error_image_probe", name=name, message=msg[:160]))
 
 
 def probe_images(url: str) -> ImagePost:
     """解析帖子中的全部图片（不下载），返回图片列表（含原图与缩略图链接）。"""
     url = (url or "").strip()
     if not url:
-        raise ImageError("请输入帖子链接")
+        raise ImageError(i18n.tr("enter_post_link"))
 
     # 每次解析前重置 gallery-dl 全局配置，避免残留
     gdl_config.clear()
@@ -162,8 +160,8 @@ def probe_images(url: str) -> ImagePost:
 
     if not items:
         is_ig = "instagram" in url.lower()
-        raise ImageError("该帖子中没有解析到图片" +
-                         ("（Instagram 匿名访问受限时也会出现此提示）" if is_ig else ""))
+        suffix = i18n.tr("instagram_limited_suffix") if is_ig else ""
+        raise ImageError(i18n.tr("error_no_images", suffix=suffix))
 
     title = re.sub(r"\s+", " ", title).strip()
     return ImagePost(url=url, title=title[:120], author=author, items=items)
@@ -178,7 +176,7 @@ def fetch_thumbnail(item: ImageItem, max_bytes: int = 8 * 1024 * 1024,
             r = requests.get(item.thumb_url, headers={"User-Agent": UA}, timeout=10)
             r.raise_for_status()
             if len(r.content) > max_bytes:
-                raise ImageError("缩略图过大")
+                raise ImageError(i18n.tr("error_thumbnail_large"))
             return r.content
         except requests.RequestException as exc:
             last_exc = exc
@@ -207,7 +205,7 @@ def download_images(
     已完成的文件保留，抛出 ImageCancelled。
     """
     if not items:
-        raise ImageError("请先勾选要下载的图片")
+        raise ImageError(i18n.tr("error_select_images"))
     os.makedirs(save_dir, exist_ok=True)
     total = len(items)
     paths: List[str] = []
@@ -246,7 +244,8 @@ def download_images(
                             if progress and content_len:
                                 frac = min(1.0, done_bytes / content_len)
                                 percent = (i + frac) / total * 100
-                                progress(percent, f"正在下载第 {i + 1}/{total} 张")
+                                progress(percent, i18n.tr(
+                                    "image_progress", index=i + 1, total=total))
                 os.replace(part, path)
                 last_exc = None
                 break
@@ -258,10 +257,11 @@ def download_images(
                 last_exc = exc
         if last_exc is not None:
             raise ImageError(
-                f"第 {i + 1} 张图片下载失败：网络错误"
-                f"（{last_exc.__class__.__name__}）") from last_exc
+                i18n.tr("error_image_download", index=i + 1,
+                        error=last_exc.__class__.__name__)) from last_exc
         paths.append(path)
         if progress:
-            progress((i + 1) / total * 100, f"已完成 {i + 1}/{total} 张")
+            progress((i + 1) / total * 100, i18n.tr(
+                "image_done_progress", index=i + 1, total=total))
 
     return paths

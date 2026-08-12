@@ -15,6 +15,7 @@
 - 每一种下载方式分别记住保存目录。视频、仅音频、图片不会互相覆盖目录设置。
 - 复制受支持的链接后切回应用，自动识别链接、切换平台并开始解析。
 - 支持跟随系统、浅色和深色主题。
+- 支持简体中文、繁体中文、英语、韩语和日语，语言可在设置页切换并持久化。
 - macOS 支持 menubar 常驻图标、Dock/窗口图标切换；Windows 和 Linux 会跳过 macOS 专属功能。
 - ffmpeg 由 imageio-ffmpeg 提供，正常安装依赖后不需要单独安装 ffmpeg。
 
@@ -153,6 +154,9 @@ git diff --check
 ~~~bash
 # 基础窗口和平台页面
 .venv/bin/python test_smoke_ui.py
+
+# 本地化资源完整性（五种语言）
+.venv/bin/python test_i18n.py
 
 # 保存目录同步、专属目录和重启持久化
 .venv/bin/python test_save_dir_sync.py
