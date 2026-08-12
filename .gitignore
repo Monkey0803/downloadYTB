@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.env
+.env.*
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Local build output and generated verification artifacts
+dist/
+build/work/
+build/verify/
+build/VideoDownloader.spec
+screenshots/
+test_downloads/
+
+# Local tool metadata
+.qoder/
+.idea/
+.vscode/

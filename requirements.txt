@@ -1,0 +1,8 @@
+yt-dlp
+yt-dlp-ejs
+gallery-dl
+requests
+pillow
+imageio-ffmpeg
+pyinstaller
+pyobjc-framework-Cocoa ; sys_platform == "darwin"
