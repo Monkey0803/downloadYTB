@@ -28,6 +28,14 @@ from .widgets import (
     apply_theme_tree, ellipsize, ellipsize_filename,
 )
 
+_NATIVE_SCROLL_AVAILABLE = False
+if sys.platform == "darwin":
+    try:
+        from AppKit import NSEvent, NSEventMaskScrollWheel
+        _NATIVE_SCROLL_AVAILABLE = True
+    except Exception:
+        pass
+
 URL_RE = re.compile(
     r"https?://"
     r"(?:"
@@ -187,11 +195,15 @@ class VideoPanel(TFrame):
                 self.mode_var, command=self._on_mode_change, font=f.f_btn, width=250,
             )
             self.mode_seg.pack(side="left")
-            TLabel(opt_row, text=i18n.tr("quality"), font=f.f_body, bg_role="CARD",
-                   fg_role="TEXT_SUB").pack(side="left", padx=(22, 8))
+            self.quality_label = TLabel(
+                opt_row, text=i18n.tr("quality"), font=f.f_body, bg_role="CARD",
+                fg_role="TEXT_SUB")
+            self.quality_label.pack(side="left", padx=(22, 8))
         else:
-            TLabel(opt_row, text=i18n.tr("quality"), font=f.f_body, bg_role="CARD",
-                   fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+            self.quality_label = TLabel(
+                opt_row, text=i18n.tr("quality"), font=f.f_body, bg_role="CARD",
+                fg_role="TEXT_SUB")
+            self.quality_label.pack(side="left", padx=(0, 8))
         self.quality_var = tk.StringVar(value=i18n.tr("probe_first"))
         self.quality_select = PillSelect(opt_row, self.quality_var,
                                          font=f.f_btn, width=196)
@@ -267,7 +279,17 @@ class VideoPanel(TFrame):
 
     def _on_mode_change(self):
         audio = self.mode_var.get() == "audio"
-        self.quality_select.set_enabled(not audio)
+        self.quality_label.configure(text=i18n.tr("bitrate" if audio else "quality"))
+        if self._info is not None:
+            options = self._info.audio_options if audio else self._info.qualities
+            values = [option.display for option in options]
+            if not values:
+                values = [i18n.tr("probe_first")]
+            self.quality_select.set_values(values)
+            self.quality_var.set(values[0])
+        self.quality_select.set_enabled(self._info is not None and bool(
+            self._info.audio_options if audio else self._info.qualities
+        ))
         # 视频与仅音频是两个独立的下载方式，各自恢复上次选择的目录。
         saved_dir = self.app.default_save_dir(self._save_dir_key())
         if self.dir_var.get() != saved_dir:
@@ -366,6 +388,14 @@ class VideoPanel(TFrame):
                 return q.max_height
         return None
 
+    def _audio_option_for_label(self, label):
+        if not self._info:
+            return None
+        for option in self._info.audio_options:
+            if label == option.display:
+                return option
+        return None
+
     def _on_url_edited(self):
         """链接被修改后，旧的解析结果立即失效（清晰度档位归零）。"""
         if self._downloading or self._paused or self._info is None:
@@ -427,12 +457,15 @@ class VideoPanel(TFrame):
             return
         # 先持久化当前输入；清空输入时也能正确回退到全局默认目录。
         self.app.apply_download_dir(self._save_dir_key(), self.dir_var.get().strip())
+        audio_option = self._audio_option_for_label(self.quality_var.get())
         self._dl_params = {
             "url": self._info.url,
             "save_dir": self.app.default_save_dir(self._save_dir_key()),
             "audio_only": self.mode_var.get() == "audio",
             "height": (None if self.mode_var.get() == "audio"
                        else self._height_for_label(self.quality_var.get())),
+            "audio_bitrate": audio_option.bitrate_kbps if audio_option else 192,
+            "audio_format_id": audio_option.format_id if audio_option else None,
         }
         self._last_file = None
         self._last_percent = 0.0
@@ -502,7 +535,9 @@ class VideoPanel(TFrame):
                     path = core.download_audio(p["url"], save_dir=p["save_dir"],
                                                progress=on_progress,
                                                cancel_event=cancel_event,
-                                               pause_event=pause_event)
+                                               pause_event=pause_event,
+                                               bitrate_kbps=p["audio_bitrate"],
+                                               format_id=p["audio_format_id"])
                 else:
                     path = core.download_video(p["url"], height=p["height"],
                                                save_dir=p["save_dir"],
@@ -1115,6 +1150,49 @@ class SettingsPage(TFrame):
         TLabel(b3, text=i18n.tr("cookie_hint"),
                font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB",
                anchor="w", justify="left").pack(anchor="w", fill="x", pady=(10, 0))
+        self._bind_scroll_events()
+
+    def _walk_widgets(self, widget=None):
+        """遍历设置页控件，确保鼠标停在任意控件上都能滚动。"""
+        widget = self if widget is None else widget
+        yield widget
+        for child in widget.winfo_children():
+            yield from self._walk_widgets(child)
+
+    def _bind_scroll_events(self):
+        """把滚轮事件绑定到设置页的每个子控件，而非只依赖 bind_all。"""
+        for widget in self._walk_widgets():
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(sequence, self._on_scroll_event, add="+")
+
+    def _on_scroll_event(self, event):
+        self.scroll_with_wheel(event)
+        return "break"
+
+    def scroll_by_delta(self, delta):
+        """按滚动量移动 Canvas；兼容鼠标整格和触控板小数值。"""
+        try:
+            delta = float(delta)
+        except (TypeError, ValueError):
+            return
+        if not delta:
+            return
+        if sys.platform == "darwin":
+            units = -int(delta)
+            if not units:
+                units = -1 if delta > 0 else 1
+            units = max(-10, min(10, units))
+        else:
+            units = -1 if delta > 0 else 1
+        self._scroll_canvas.yview_scroll(units, "units")
+
+    def scroll_with_wheel(self, event):
+        """处理设置页的鼠标滚轮与 macOS 触控板双指滚动。"""
+        button = getattr(event, "num", None)
+        if button in (4, 5):
+            self._scroll_canvas.yview_scroll(-1 if button == 4 else 1, "units")
+            return
+        self.scroll_by_delta(getattr(event, "delta", 0))
 
     def _load_logo_thumb(self, key, size=64):
         """加载某款 logo 的 64px 预览缩略图；缺失时返回 None。"""
@@ -1205,6 +1283,15 @@ class App(tk.Tk):
         self._setup_fonts()
         self._build_layout()
         self.show_page("youtube")
+        self._native_scroll_monitor = None
+        self._native_scroll_pending = 0.0
+        self._native_scroll_window_title = i18n.tr("app_title")
+        # Tk 的滚轮事件不会自动传给 Canvas 的父容器；绑定到
+        # 顶层窗口，才能在设置页任意子控件上使用滚轮/触控板。
+        self.bind_all("<MouseWheel>", self._on_mouse_wheel, add="+")
+        self.bind_all("<Button-4>", self._on_mouse_wheel, add="+")
+        self.bind_all("<Button-5>", self._on_mouse_wheel, add="+")
+        self._install_native_scroll_monitor()
 
         # macOS：menubar 常驻图标；启用后关闭窗口仅隐藏，应用保留在状态栏
         self.menubar = menubar.create(
@@ -1238,6 +1325,56 @@ class App(tk.Tk):
                 if isinstance(path, str) and path.strip():
                     return path.strip()
         return self.settings.get("save_dir") or core.DEFAULT_SAVE_DIR
+
+    def _on_mouse_wheel(self, event):
+        if self.current_page != "settings":
+            return
+        page = self.pages.get("settings")
+        if page is not None:
+            page.scroll_with_wheel(event)
+            return "break"
+
+    def _install_native_scroll_monitor(self):
+        """监听 macOS 原生滚轮，覆盖 Tk 未转发鼠标滚轮的情况。"""
+        if not _NATIVE_SCROLL_AVAILABLE:
+            return
+        try:
+            self._native_scroll_monitor = (
+                NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+                    NSEventMaskScrollWheel, self._on_native_scroll))
+            self.after(20, self._poll_native_scroll)
+        except Exception:
+            self._native_scroll_monitor = None
+
+    def _on_native_scroll(self, event):
+        """AppKit 回调只记录数据，不在回调中调用 Tk。"""
+        try:
+            if self.current_page != "settings":
+                return event
+            window = event.window()
+            if window is None or window.title() != self._native_scroll_window_title:
+                return event
+            # 188 是侧边栏宽度；只让设置页内容区域响应滚动。
+            if event.locationInWindow().x < 188:
+                return event
+            delta = float(event.scrollingDeltaY())
+            if not delta:
+                return event
+            self._native_scroll_pending += delta
+            return None
+        except Exception:
+            return event
+
+    def _poll_native_scroll(self):
+        """在 Tk 主线程消费 AppKit 回调积累的滚动量。"""
+        delta = self._native_scroll_pending
+        self._native_scroll_pending = 0.0
+        if delta and self.current_page == "settings":
+            page = self.pages.get("settings")
+            if page is not None:
+                page.scroll_by_delta(delta)
+        if self.winfo_exists():
+            self.after(20, self._poll_native_scroll)
 
     def apply_download_dir(self, key, path):
         """只保存并更新一个下载方式的目录，不影响其它方式。"""
@@ -1436,6 +1573,7 @@ class App(tk.Tk):
         self.settings["language"] = i18n.language()
         settings.save(self.settings)
         self.title(i18n.tr("app_title"))
+        self._native_scroll_window_title = i18n.tr("app_title")
         if self.menubar is not None:
             self.menubar.update_language()
         for child in (getattr(self, "sidebar", None), getattr(self, "content", None)):
@@ -1536,6 +1674,11 @@ class App(tk.Tk):
         self.after(200, lambda: self._wait_downloads_then_destroy(tries - 1))
 
     def _destroy_app(self):
+        if self._native_scroll_monitor is not None:
+            try:
+                NSEvent.removeMonitor_(self._native_scroll_monitor)
+            except Exception:
+                pass
         if self.menubar is not None:
             self.menubar.remove()
         self.destroy()

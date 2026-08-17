@@ -47,6 +47,7 @@ T = {
     "video_with_audio": {"zh_CN": "视频（含音轨）", "zh_TW": "影片（含音訊）", "en": "Video (with audio)", "ko": "동영상 (오디오 포함)", "ja": "動画（音声付き）"},
     "audio_only": {"zh_CN": "仅音频 (MP3)", "zh_TW": "僅音訊 (MP3)", "en": "Audio only (MP3)", "ko": "오디오만 (MP3)", "ja": "音声のみ (MP3)"},
     "quality": {"zh_CN": "清晰度", "zh_TW": "畫質", "en": "Quality", "ko": "화질", "ja": "画質"},
+    "bitrate": {"zh_CN": "比特率", "zh_TW": "比特率", "en": "Bitrate", "ko": "비트레이트", "ja": "ビットレート"},
     "probe_first": {"zh_CN": "请先解析链接", "zh_TW": "請先解析連結", "en": "Probe the URL first", "ko": "먼저 링크를 분석하세요", "ja": "先にリンクを解析してください"},
     "save_location": {"zh_CN": "保存位置", "zh_TW": "儲存位置", "en": "Save Location", "ko": "저장 위치", "ja": "保存先"},
     "choose": {"zh_CN": "选择…", "zh_TW": "選擇…", "en": "Choose…", "ko": "선택…", "ja": "選択…"},

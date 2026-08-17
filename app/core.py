@@ -69,6 +69,21 @@ class QualityOption:
 
 
 @dataclass
+class AudioOption:
+    """一个可下载的 MP3 比特率档位。"""
+
+    bitrate_kbps: int
+    size_bytes: Optional[int] = None
+    format_id: Optional[str] = None
+
+    @property
+    def display(self) -> str:
+        size = format_size(self.size_bytes)
+        label = f"{self.bitrate_kbps} kbps"
+        return f"{label} ・ 约 {size}" if size else label
+
+
+@dataclass
 class VideoInfo:
     """probe() 的解析结果。"""
 
@@ -77,6 +92,7 @@ class VideoInfo:
     duration: Optional[float]
     uploader: str
     qualities: List[QualityOption] = field(default_factory=list)  # 可用清晰度（降序）
+    audio_options: List[AudioOption] = field(default_factory=list)  # 可用音频比特率（降序）
 
     @property
     def heights(self) -> List[int]:
@@ -290,6 +306,42 @@ def probe(url: str) -> VideoInfo:
         if best_audio else None
     )
 
+    # 音频模式会转为对应比特率的 MP3。将站点提供的音频码率归一到
+    # 常见 MP3 档位，再用时长估算转码后的容量。单流站点则从含音轨的
+    # 视频格式中提取音频。
+    audio_candidates = audio_only or [
+        f for f in formats if f.get("acodec") not in (None, "none")
+    ]
+    standard_bitrates = (32, 48, 64, 96, 128, 160, 192, 256, 320)
+    audio_by_bitrate = {}
+    for fmt in audio_candidates:
+        raw_bitrate = fmt.get("abr") or fmt.get("tbr")
+        if not raw_bitrate:
+            continue
+        bitrate = min(standard_bitrates, key=lambda value: abs(value - raw_bitrate))
+        current = audio_by_bitrate.get(bitrate)
+        size = fmt.get("filesize") or fmt.get("filesize_approx")
+        # 同档优先使用纯音频流，其次使用更接近目标档位的流。
+        rank = (
+            fmt.get("vcodec") in (None, "none"),
+            -abs(float(raw_bitrate) - bitrate),
+        )
+        if current is None or rank > current[0]:
+            audio_by_bitrate[bitrate] = (rank, fmt, size)
+
+    audio_options = []
+    for bitrate, (_, fmt, source_size) in sorted(audio_by_bitrate.items(), reverse=True):
+        estimated_size = None
+        if info.get("duration"):
+            estimated_size = int(float(info["duration"]) * bitrate * 1000 / 8)
+        elif source_size:
+            estimated_size = int(source_size)
+        audio_options.append(AudioOption(
+            bitrate_kbps=bitrate,
+            size_bytes=estimated_size,
+            format_id=str(fmt.get("format_id")) if fmt.get("format_id") is not None else None,
+        ))
+
     tiers = {}  # 标准档位数值 -> {"h": 实际最大高度, "fmt": 该档位最佳视频格式}
     for f in formats:
         h = f.get("height")
@@ -329,6 +381,7 @@ def probe(url: str) -> VideoInfo:
         duration=info.get("duration"),
         uploader=info.get("uploader") or info.get("channel") or "",
         qualities=qualities,
+        audio_options=audio_options,
     )
 
 
@@ -511,6 +564,8 @@ def download_audio(
     progress: Optional[ProgressCallback] = None,
     cancel_event: Optional[threading.Event] = None,
     pause_event: Optional[threading.Event] = None,
+    bitrate_kbps: int = 192,
+    format_id: Optional[str] = None,
 ) -> str:
     """仅下载音频并转为 mp3，返回文件路径。"""
     os.makedirs(save_dir, exist_ok=True)
@@ -518,7 +573,7 @@ def download_audio(
     opts = _base_opts()
     opts.update(
         {
-            "format": "bestaudio/best",
+            "format": f"{format_id}/bestaudio/best" if format_id else "bestaudio/best",
             # 文件名加 [audio] 后缀，避免中间文件与同名视频文件冲突
             # （否则提取 mp3 后会把同名 .mp4 当作源文件删除）
             "outtmpl": os.path.join(save_dir, "%(title).120B [%(id)s] [audio].%(ext)s"),
@@ -529,7 +584,7 @@ def download_audio(
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
-                    "preferredquality": "192",
+                    "preferredquality": str(bitrate_kbps),
                 }
             ],
         }
