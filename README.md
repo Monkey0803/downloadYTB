@@ -1,6 +1,6 @@
 # 多平台下载器
 
-一个基于 Python、Tkinter、yt-dlp 和 gallery-dl 的桌面下载器，支持 YouTube、X、Instagram、抖音和哔哩哔哩的视频或图片下载。
+一个基于 Python、Tkinter、yt-dlp 和 gallery-dl 的桌面下载器，支持 YouTube、X、Instagram、抖音、哔哩哔哩和微博的视频或图片下载。
 
 [English README](README.en.md) · [GitHub Repository](https://github.com/Monkey0803/downloadYTB) · [MIT License](LICENSE)
 
@@ -10,7 +10,8 @@
 
 - 在统一的桌面界面中解析并下载多个平台的内容。
 - 视频下载时选择可用清晰度；支持仅音频 MP3。
-- X 和 Instagram 图片帖子解析后显示缩略图，支持全选或单选原图下载。
+- X、Instagram 和微博图片帖子解析后显示缩略图，支持全选或单选原图下载；微博 GIF 会按 GIF 保存。
+- 微博支持视频、图片/GIF 以及多图批量下载。
 - 视频下载支持暂停、断点续传和取消；图片下载支持取消，已完成文件会保留。
 - 每一种下载方式分别记住保存目录。视频、仅音频、图片不会互相覆盖目录设置。
 - 复制受支持的链接后切回应用，自动识别链接、切换平台并开始解析。
@@ -28,6 +29,7 @@
 | Instagram | 支持 | 支持 | 支持 | 通常需要浏览器 Cookie |
 | 抖音 | 支持 | 支持 | - | 通常是单档位音视频流 |
 | 哔哩哔哩 | 支持 | 支持 | - | DASH 视频和音频由 ffmpeg 合并 |
+| 微博 | 支持 | 支持 | 支持 | 图片/GIF 支持多选批量下载；可能需要浏览器 Cookie |
 
 平台接口会变化，因此“支持”表示代码提供对应的解析和下载路径，不代表任何链接、地区、账号状态或网络环境下都一定可用。
 
@@ -39,7 +41,7 @@ downloadYTB/
 ├── app/
 │   ├── gui.py                 # 主窗口、侧边栏、平台页和下载面板
 │   ├── core.py                # yt-dlp 视频解析、格式选择和下载控制
-│   ├── images.py              # gallery-dl 图片解析和 requests 下载
+│   ├── images.py              # gallery-dl / 微博图片解析和 requests 下载
 │   ├── widgets.py             # Liquid Glass 风格 Tkinter 控件
 │   ├── theme.py               # 浅色 / 深色 / 跟随系统主题
 │   ├── settings.py            # JSON 设置持久化
@@ -168,6 +170,9 @@ git diff --check
 # X / Instagram 图片解析、缩略图、多选和取消
 .venv/bin/python test_gui_flow.py
 .venv/bin/python test_images.py
+
+# 微博 URL、图片/GIF 批量解析回归
+.venv/bin/python test_weibo.py
 ~~~
 
 联网测试会访问真实平台，可能受到链接失效、登录状态、Cookie 权限、地区、网络出口和平台限流影响。测试输出和截图只用于本地验证，不应提交到仓库。

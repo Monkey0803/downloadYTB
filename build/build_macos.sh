@@ -12,6 +12,8 @@ if [ ! -x "$PYTHON" ]; then
     exit 1
 fi
 
+APP_VERSION="$($PYTHON -c 'from app import __version__; print(__version__)')"
+
 "$PYTHON" -m PyInstaller \
     --noconfirm \
     --windowed \
@@ -27,5 +29,12 @@ fi
     --specpath build \
     main.py
 
+INFO_PLIST="$PWD/dist/VideoDownloader.app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$INFO_PLIST" \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $APP_VERSION" "$INFO_PLIST"
+# PlistBuddy changes the signed bundle after PyInstaller finishes; sign it again.
+codesign --force --deep --sign - "$PWD/dist/VideoDownloader.app" >/dev/null
+
 echo
-echo "打包完成：dist/VideoDownloader.app"
+echo "打包完成：dist/VideoDownloader.app（版本 ${APP_VERSION}）"

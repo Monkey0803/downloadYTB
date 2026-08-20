@@ -1,6 +1,6 @@
 """yt-dlp 封装：视频信息解析、清晰度列表、视频/音频下载与进度回调。
 
-支持 YouTube / X（Twitter）/ Instagram / 抖音（Douyin）/ 哔哩哔哩（Bilibili）
+支持 YouTube / X（Twitter）/ Instagram / 抖音（Douyin）/ 哔哩哔哩（Bilibili）/ 微博（Weibo）
 链接，均由 yt-dlp 自动识别。抖音通常仅单一清晰度档位，B 站为 DASH 分离的
 视频流 + 音频流，由 ffmpeg 自动合并为单文件（音视频同轨）。
 """

@@ -48,6 +48,9 @@ URL_RE = re.compile(
     r"|v\.douyin\.com/[\w-]+\S*"
     r"|(?:www\.|m\.)?bilibili\.com/video/[\w-]+\S*"
     r"|b23\.tv/[\w-]+\S*"
+    r"|(?:www\.)?weibo\.com/(?:\d+/[A-Za-z0-9]+|0/\d+|tv/show/[\w:]+)\S*"
+    r"|video\.weibo\.com/show\?\S*"
+    r"|m\.weibo\.cn/(?:status|detail)/\d+\S*"
     r")",
     re.IGNORECASE,
 )
@@ -101,7 +104,15 @@ def detect_platform(url: str):
         return "douyin"
     if "bilibili.com" in low or "b23.tv" in low:
         return "bilibili"
+    if "weibo.com" in low or "weibo.cn" in low:
+        return "weibo"
     return None
+
+
+def is_weibo_video_url(url: str):
+    """判断微博专用视频地址；普通微博状态统一按媒体帖子解析。"""
+    low = (url or "").lower()
+    return "/tv/show/" in low or "video.weibo.com/show" in low
 
 
 def download_dir_key(platform: str, kind: str) -> str:
@@ -112,24 +123,27 @@ def download_dir_key(platform: str, kind: str) -> str:
         "Instagram": "instagram",
         "抖音": "douyin",
         "哔哩哔哩": "bilibili",
+        "微博": "weibo",
     }
     platform_key = platform_keys.get(platform, (platform or "unknown").lower())
     return f"{platform_key}_{kind}"
 
 
 # ====================================================================
-# 视频下载面板（yt-dlp）：YouTube / X / Instagram 共用
+# 视频下载面板（yt-dlp）：YouTube / X / Instagram / 微博 共用
 # ====================================================================
 
 
 class VideoPanel(TFrame):
     """单平台的视频下载面板：解析 → 清晰度 → 下载（暂停/继续/取消）。"""
 
-    def __init__(self, master, app, platform="YouTube", show_audio=True):
+    def __init__(self, master, app, platform="YouTube", show_audio=True,
+                 on_redirect=None):
         super().__init__(master, bg_role="BG")
         self.app = app
         self.platform = platform
         self._show_audio = show_audio
+        self._on_redirect = on_redirect
 
         self._info = None
         self._busy = False
@@ -144,6 +158,9 @@ class VideoPanel(TFrame):
 
         self._build()
 
+    def _url_prompt_key(self):
+        return "post_link" if self.platform == "微博" else "video_link"
+
     # ---------- 界面 ----------
 
     def _build(self):
@@ -154,7 +171,7 @@ class VideoPanel(TFrame):
         card1.set_height(130)
         card1.pack(fill="x", pady=(0, 12))
         b1 = card1.body
-        TLabel(b1, text=i18n.tr("video_link"), font=f.f_section, bg_role="CARD",
+        TLabel(b1, text=i18n.tr(self._url_prompt_key()), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
 
         row = TFrame(b1, bg_role="CARD")
@@ -296,6 +313,8 @@ class VideoPanel(TFrame):
             self.dir_var.set(saved_dir)
 
     def _save_dir_key(self):
+        if self.platform == "微博":
+            return download_dir_key(self.platform, "media")
         kind = "audio" if self.mode_var.get() == "audio" else "video"
         return download_dir_key(self.platform, kind)
 
@@ -331,7 +350,11 @@ class VideoPanel(TFrame):
             return
         url = self.url_entry.get().strip()
         if not url:
-            self._set_status(i18n.tr("enter_video_link"), error=True)
+            self._set_status(i18n.tr(self._url_prompt_key()), error=True)
+            return
+        if (self.platform == "微博" and not is_weibo_video_url(url)
+                and self._on_redirect is not None):
+            self._on_redirect("image", url)
             return
 
         self._busy = True
@@ -448,7 +471,11 @@ class VideoPanel(TFrame):
             return
         url = self.url_entry.get().strip()
         if not url:
-            self._set_status(i18n.tr("enter_video_link"), error=True)
+            self._set_status(i18n.tr(self._url_prompt_key()), error=True)
+            return
+        if (self.platform == "微博" and not is_weibo_video_url(url)
+                and self._on_redirect is not None):
+            self._on_redirect("image", url)
             return
         # 未解析、或链接已变更（解析结果与输入不一致）时：先自动解析，
         # 成功后用解析出的最高档位继续下载，避免用旧视频的档位下错视频
@@ -602,17 +629,18 @@ class VideoPanel(TFrame):
 
 
 # ====================================================================
-# 图片下载面板（gallery-dl 解析 + requests 下载）：X / Instagram 共用
+# 图片下载面板（gallery-dl 解析 + requests 下载）：X / Instagram / 微博 共用
 # ====================================================================
 
 
 class ImagePanel(TFrame):
     """图片下载面板：解析帖子 → 缩略图多选（全选）→ 下载（可取消）。"""
 
-    def __init__(self, master, app, platform="X"):
+    def __init__(self, master, app, platform="X", on_redirect=None):
         super().__init__(master, bg_role="BG")
         self.app = app
         self.platform = platform
+        self._on_redirect = on_redirect
 
         self._post = None
         self._busy = False
@@ -651,8 +679,10 @@ class ImagePanel(TFrame):
         b2 = card2.body
         head = TFrame(b2, bg_role="CARD")
         head.pack(fill="x")
-        TLabel(head, text=i18n.tr("image_selection"), font=f.f_section, bg_role="CARD",
-               fg_role="TEXT_SUB").pack(side="left")
+        self.selection_label = TLabel(
+            head, text=i18n.tr("image_selection"), font=f.f_section,
+            bg_role="CARD", fg_role="TEXT_SUB")
+        self.selection_label.pack(side="left")
         self.count_label = TLabel(head, text="", font=f.f_small, bg_role="CARD",
                                   fg_role="TEXT_SUB")
         self.count_label.pack(side="right")
@@ -730,6 +760,8 @@ class ImagePanel(TFrame):
             self.app.apply_download_dir(self._save_dir_key(), path)
 
     def _save_dir_key(self):
+        if self.platform == "微博":
+            return download_dir_key(self.platform, "media")
         return download_dir_key(self.platform, "image")
 
     def on_paste(self):
@@ -772,6 +804,10 @@ class ImagePanel(TFrame):
         if not url:
             self._set_status(i18n.tr("enter_post_link"), error=True)
             return
+        if (self.platform == "微博" and is_weibo_video_url(url)
+                and self._on_redirect is not None):
+            self._on_redirect("video", url)
+            return
         self._busy = True
         self._thumb_epoch += 1
         self.probe_btn.configure_state("disabled")
@@ -805,12 +841,21 @@ class ImagePanel(TFrame):
             desc = f"{desc}  ·  {post.title}" if desc else post.title
         self.post_label.set_fg_role("TEXT")
         self.post_label.configure(text=desc or i18n.tr("no_text"))
+        mixed = post.has_video
+        self.selection_label.configure(text=i18n.tr(
+            "media_selection" if mixed else "image_selection"))
+        self.post_label.configure(text=desc or i18n.tr(
+            "select_media_hint" if mixed else "select_images_hint"))
+        self.download_btn.configure(text=i18n.tr(
+            "download_selected_media" if mixed else "download_selected_images"))
 
         items = []
         for it in post.items:
             sub = it.size_text + (f" · {it.extension.upper()}" if it.extension else "")
             items.append({
-                "label": i18n.tr("image_label", index=it.index),
+                "label": i18n.tr(
+                    "video_label" if it.media_type == "video" else "image_label",
+                    index=it.index),
                 "sub": sub.strip(" ·"),
                 "selected": True,
                 "photo": None,
@@ -819,7 +864,9 @@ class ImagePanel(TFrame):
         self.picker.set_items(items)
         self.all_var.set(True)
         self._on_selection_change()
-        self._set_status(i18n.tr("probe_success_images", n=len(post.items)), ok=True)
+        self._set_status(i18n.tr(
+            "probe_success_media" if mixed else "probe_success_images",
+            n=len(post.items)), ok=True)
         self._load_thumbnails(post)
 
     def _load_thumbnails(self, post):
@@ -871,7 +918,9 @@ class ImagePanel(TFrame):
         self.cancel_btn.pack(side="left", padx=(10, 0))
         self.probe_btn.configure_state("disabled")
         self.progress.set(0)
-        self._set_status(i18n.tr("start_image_download", n=len(sel)))
+        self._set_status(i18n.tr(
+            "start_media_download" if self._post.has_video else "start_image_download",
+            n=len(sel)))
 
         def on_progress(percent, text):
             def update():
@@ -970,28 +1019,43 @@ class VideoPlatformPage(TFrame):
 
 
 class MediaPlatformPage(TFrame):
-    """X / Instagram 页：顶部「视频 / 图片」分段切换两个面板。"""
+    """支持视频和图片的平台页，可按需显示手动类型切换。"""
 
-    def __init__(self, master, app, title, subtitle, platform, hint=""):
+    def __init__(self, master, app, title, subtitle, platform, hint="",
+                 show_kind_switch=True):
         super().__init__(master, bg_role="BG")
+        self._show_kind_switch = show_kind_switch
         head_row = TFrame(self, bg_role="BG")
         head_row.pack(fill="x", pady=(0, 14))
         PageHeader(head_row, app, title, subtitle).pack(side="left")
-        self.kind_var = tk.StringVar(value="video")
-        self.kind_seg = SegmentedControl(
-            head_row, [(i18n.tr("video_segment"), "video"),
-                       (i18n.tr("image_segment"), "image")], self.kind_var,
-            command=self._on_kind_change, font=app.f_btn, width=176, bg_role="BG")
-        self.kind_seg.pack(side="right", pady=(6, 0))
+        self.kind_var = tk.StringVar(value="video" if show_kind_switch else "image")
+        self.kind_seg = None
+        if show_kind_switch:
+            self.kind_seg = SegmentedControl(
+                head_row, [(i18n.tr("video_segment"), "video"),
+                           (i18n.tr("image_segment"), "image")], self.kind_var,
+                command=self._on_kind_change, font=app.f_btn, width=176,
+                bg_role="BG")
+            self.kind_seg.pack(side="right", pady=(6, 0))
 
         if hint:
             TLabel(self, text=hint, font=app.f_small, bg_role="BG",
                    fg_role="TEXT_SUB", anchor="w", justify="left").pack(
                 fill="x", pady=(0, 8))
 
-        self.video_panel = VideoPanel(self, app, platform=platform, show_audio=False)
-        self.image_panel = ImagePanel(self, app, platform=platform)
-        self.video_panel.pack(fill="both", expand=True)
+        redirect = self._redirect_panel if platform == "微博" else None
+        self.video_panel = VideoPanel(self, app, platform=platform, show_audio=False,
+                                      on_redirect=redirect)
+        self.image_panel = ImagePanel(self, app, platform=platform,
+                                      on_redirect=redirect)
+        initial_panel = self.video_panel if self.kind_var.get() == "video" else self.image_panel
+        initial_panel.pack(fill="both", expand=True)
+
+    def _redirect_panel(self, kind, url):
+        """微博手动输入时按链接类型切换内部面板，用户无需选择类型。"""
+        self.show_kind(kind)
+        panel = self.video_panel if kind == "video" else self.image_panel
+        panel.handle_url(url)
 
     def _on_kind_change(self):
         if self.kind_var.get() == "video":
@@ -1004,12 +1068,19 @@ class MediaPlatformPage(TFrame):
     def show_kind(self, kind):
         if kind != self.kind_var.get():
             self.kind_var.set(kind)
-            self.kind_seg.refresh()
+            if self.kind_seg is not None:
+                self.kind_seg.refresh()
             self._on_kind_change()
 
     def handle_url(self, url):
         low = url.lower()
-        if "/photo/" in low:
+        if self.platform == "微博":
+            # 普通微博状态默认进入媒体列表；微博专用视频 URL 进入视频面板。
+            if not is_weibo_video_url(low):
+                self.show_kind("image")
+            else:
+                self.show_kind("video")
+        elif "/photo/" in low:
             self.show_kind("image")
         elif "instagram.com/p/" in low:
             self.show_kind("image")
@@ -1535,6 +1606,10 @@ class App(tk.Tk):
                 self.page_holder, self, i18n.tr("bilibili_title"),
                 i18n.tr("bilibili_subtitle"), platform="哔哩哔哩",
                 hint=i18n.tr("bilibili_hint")),
+            "weibo": MediaPlatformPage(
+                self.page_holder, self, i18n.tr("weibo_title"),
+                i18n.tr("weibo_subtitle"), platform="微博",
+                hint=i18n.tr("weibo_hint"), show_kind_switch=False),
             "settings": SettingsPage(self.page_holder, self),
         }
 
@@ -1543,7 +1618,8 @@ class App(tk.Tk):
                     ("x", i18n.tr("x_nav"), "x"),
                     ("instagram", i18n.tr("instagram_nav"), "instagram"),
                     ("douyin", i18n.tr("douyin_nav"), "douyin"),
-                    ("bilibili", i18n.tr("bilibili_nav"), "bilibili")]
+                    ("bilibili", i18n.tr("bilibili_nav"), "bilibili"),
+                    ("weibo", i18n.tr("weibo_nav"), "weibo")]
         for key, label, icon in nav_defs:
             item = SidebarItem(self.sidebar, label, icon,
                                command=lambda k=key: self.show_page(k),

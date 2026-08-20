@@ -33,6 +33,8 @@ STEPS = [
     ("x", "smoke_x_video.png", None),
     ("x", "smoke_x_image.png", lambda: app.pages["x"].show_kind("image")),
     ("instagram", "smoke_instagram.png", None),
+    ("weibo", "smoke_weibo_video.png", None),
+    ("weibo", "smoke_weibo_image.png", lambda: app.pages["weibo"].show_kind("image")),
     ("settings", "smoke_settings.png", None),
 ]
 

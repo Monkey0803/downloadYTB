@@ -17,16 +17,19 @@ import shutil
 import subprocess
 import sys
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS = os.path.join(ROOT, "assets")
 SRC = os.path.join(ASSETS, "app_logo.png")
 
-# 内容（含光晕）在 1024 画布中的目标尺寸；macOS 标准圆角矩形为 824，
-# 光晕略大于圆角主体，这里取 880 让主体接近系统图标大小。
+# 内容（含光晕）在 1024 画布中的目标尺寸；光晕略大于圆角主体，
+# 这里取 880 让主体接近系统图标大小。
 CANVAS = 1024
 CONTENT = 880
+# macOS Dock 图标的统一圆角约为图标内容尺寸的 22%。源 Logo 自带的
+# 圆角曲线并不一定与系统一致，因此生成资源时显式覆盖为同一套几何。
+CORNER_RADIUS = round(CONTENT * 0.22)
 
 
 def center_square(img):
@@ -77,6 +80,25 @@ def fit_canvas(img):
     off = (CANVAS - CONTENT) // 2
     canvas.paste(scaled, (off, off))
     return canvas
+
+
+def apply_standard_icon_mask(img):
+    """将图标内容裁成统一的 macOS 风格圆角矩形。"""
+    # 先超采样绘制，再缩回主画布，避免 1024px 资源的遮罩边缘出现锯齿。
+    scale = 4
+    mask = Image.new("L", (CANVAS * scale, CANVAS * scale), 0)
+    draw = ImageDraw.Draw(mask)
+    off = (CANVAS - CONTENT) // 2 * scale
+    draw.rounded_rectangle(
+        [off, off, off + CONTENT * scale - 1, off + CONTENT * scale - 1],
+        radius=CORNER_RADIUS * scale,
+        fill=255,
+    )
+    mask = mask.resize((CANVAS, CANVAS), Image.LANCZOS)
+    alpha = ImageChops.multiply(img.getchannel("A"), mask)
+    result = img.copy()
+    result.putalpha(alpha)
+    return result
 
 
 def make_icns(master):
@@ -141,7 +163,7 @@ def main():
     img = Image.open(SRC)
     img = center_square(img)
     img = remove_black_background(img)
-    master = fit_canvas(img)
+    master = apply_standard_icon_mask(fit_canvas(img))
 
     master.save(os.path.join(ASSETS, "app_icon_1024.png"))
     master.resize((512, 512), Image.LANCZOS).save(

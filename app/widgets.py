@@ -649,8 +649,8 @@ class ImagePicker(tk.Frame):
 
 
 class SidebarItem(tk.Canvas):
-    """侧边栏条目：圆角高亮 + 简笔图标 + 文字。icon 取值
-    youtube / x / instagram / douyin / bilibili / settings。"""
+    """侧边栏条目：圆角高亮 + 品牌色平台 Logo + 文字。icon 取值
+    youtube / x / instagram / douyin / bilibili / weibo / settings。"""
 
     def __init__(self, master, text, icon, command=None, font=None,
                  width=164, height=40):
@@ -699,37 +699,68 @@ class SidebarItem(tk.Canvas):
     def _draw_icon(self, cx, cy, fg):
         c = theme.C()
         if self._icon == "youtube":
-            # 圆角矩形 + 播放三角
-            draw_round_rect(self, cx - 9, cy - 7, cx + 9, cy + 7, 5, fill=fg, outline="")
-            bg = c.SIDEBAR_ACTIVE if self._active else c.SIDEBAR_BG
-            self.create_polygon(cx - 2.5, cy - 3.5, cx - 2.5, cy + 3.5, cx + 4, cy,
-                                fill=bg, outline="")
+            # YouTube 官方红色播放标志。
+            draw_round_rect(self, cx - 9, cy - 7, cx + 9, cy + 7, 5,
+                            fill="#FF0000", outline="")
+            self.create_polygon(cx - 2.5, cy - 3.5, cx - 2.5, cy + 3.5,
+                                cx + 4, cy, fill="#FFFFFF", outline="")
         elif self._icon == "x":
-            self.create_line(cx - 7, cy - 7, cx + 7, cy + 7, fill=fg, width=2.4, capstyle="round")
-            self.create_line(cx + 7, cy - 7, cx - 7, cy + 7, fill=fg, width=2.4, capstyle="round")
+            # X 官方黑/白色交叉标志。
+            logo = "#FFFFFF" if theme.is_dark() else "#111111"
+            self.create_line(cx - 7, cy - 7, cx + 7, cy + 7,
+                             fill=logo, width=2.6, capstyle="round")
+            self.create_line(cx + 7, cy - 7, cx - 7, cy + 7,
+                             fill=logo, width=2.6, capstyle="round")
         elif self._icon == "instagram":
-            draw_round_rect(self, cx - 8, cy - 8, cx + 8, cy + 8, 6, fill="", outline=fg, width=2)
-            self.create_oval(cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5, fill="", outline=fg, width=2)
-            self.create_oval(cx + 3.6, cy - 5.8, cx + 5.8, cy - 3.6, fill=fg, outline="")
+            # Instagram 官方相机标志，使用品牌洋红色底和白色细节。
+            draw_round_rect(self, cx - 8, cy - 8, cx + 8, cy + 8, 5,
+                            fill="#E4405F", outline="")
+            self.create_oval(cx - 4, cy - 4, cx + 4, cy + 4,
+                             fill="", outline="#FFFFFF", width=1.8)
+            self.create_oval(cx + 3.2, cy - 5.2, cx + 5.4, cy - 3.0,
+                             fill="#FFFFFF", outline="")
         elif self._icon == "douyin":
-            # 抖音风格：八分音符（符头 + 符干 + 双旗），单色线条
-            self.create_oval(cx - 8, cy + 2, cx - 2, cy + 8, fill=fg, outline="")
-            self.create_line(cx - 2.6, cy + 6, cx - 2.6, cy - 8, fill=fg,
-                             width=2.2, capstyle="round")
-            self.create_line(cx - 2.6, cy - 8, cx + 7, cy - 5, fill=fg,
-                             width=2.2, capstyle="round")
-            self.create_line(cx - 2.6, cy - 3.5, cx + 7, cy - 0.5, fill=fg,
-                             width=2.2, capstyle="round")
+            # 抖音/TikTok 官方音符的青、粉错位效果。
+            for offset, color in ((-1.5, "#25F4EE"), (1.5, "#FE2C55")):
+                self.create_oval(cx - 8 + offset, cy + 2,
+                                 cx - 2 + offset, cy + 8,
+                                 fill=color, outline="")
+                self.create_line(cx - 2.6 + offset, cy + 6,
+                                 cx - 2.6 + offset, cy - 8,
+                                 fill=color, width=2.2, capstyle="round")
+                self.create_line(cx - 2.6 + offset, cy - 8,
+                                 cx + 7 + offset, cy - 5,
+                                 fill=color, width=2.2, capstyle="round")
+            self.create_oval(cx - 8, cy + 2, cx - 2, cy + 8,
+                             fill=fg, outline="")
+            self.create_line(cx - 2.6, cy + 6, cx - 2.6, cy - 8,
+                             fill=fg, width=2.2, capstyle="round")
+            self.create_line(cx - 2.6, cy - 8, cx + 7, cy - 5,
+                             fill=fg, width=2.2, capstyle="round")
         elif self._icon == "bilibili":
-            # 哔哩哔哩风格：电视机头（双天线 + 机身 + 双眼），单色线条
+            # 哔哩哔哩官方蓝色电视机头标志。
+            blue = "#00AEEC"
             draw_round_rect(self, cx - 9, cy - 4, cx + 9, cy + 8, 4,
-                            fill="", outline=fg, width=2)
-            self.create_line(cx - 6, cy - 9, cx - 2.5, cy - 4, fill=fg,
-                             width=2, capstyle="round")
-            self.create_line(cx + 6, cy - 9, cx + 2.5, cy - 4, fill=fg,
-                             width=2, capstyle="round")
-            self.create_oval(cx - 5.5, cy + 0.5, cx - 2.5, cy + 3.5, fill=fg, outline="")
-            self.create_oval(cx + 2.5, cy + 0.5, cx + 5.5, cy + 3.5, fill=fg, outline="")
+                            fill=blue, outline="")
+            self.create_line(cx - 6, cy - 9, cx - 2.5, cy - 4,
+                             fill=blue, width=2, capstyle="round")
+            self.create_line(cx + 6, cy - 9, cx + 2.5, cy - 4,
+                             fill=blue, width=2, capstyle="round")
+            self.create_oval(cx - 5.5, cy + 0.5, cx - 2.5, cy + 3.5,
+                             fill="#FFFFFF", outline="")
+            self.create_oval(cx + 2.5, cy + 0.5, cx + 5.5, cy + 3.5,
+                             fill="#FFFFFF", outline="")
+        elif self._icon == "weibo":
+            # 微博官方红色眼睛/气泡标志。
+            red = "#E6162D"
+            self.create_oval(cx - 8, cy - 6, cx + 8, cy + 6,
+                             fill=red, outline="")
+            self.create_polygon(cx + 4, cy + 4, cx + 8, cy + 8,
+                                cx + 1, cy + 5, fill=red, outline="")
+            self.create_oval(cx - 4.5, cy - 2.5, cx + 4.5, cy + 2.5,
+                             fill="#FFFFFF", outline="")
+            self.create_oval(cx - 1.5, cy - 2.5, cx + 2.5, cy + 2.5,
+                             fill=red, outline="")
         elif self._icon == "settings":
             # 齿轮：外圈 + 内孔 + 齿
             import math

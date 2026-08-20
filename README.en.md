@@ -1,6 +1,6 @@
 # Multi-Platform Downloader
 
-A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supports video or image downloads from YouTube, X, Instagram, Douyin, and Bilibili.
+A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supports video or image downloads from YouTube, X, Instagram, Douyin, Bilibili, and Weibo.
 
 [中文 README](README.md) · [GitHub Repository](https://github.com/Monkey0803/downloadYTB) · [MIT License](LICENSE)
 
@@ -10,7 +10,8 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 
 - One desktop interface for parsing and downloading content from multiple platforms.
 - Select an available video quality after probing a URL; audio-only MP3 downloads are supported.
-- Parse X and Instagram image posts into a thumbnail grid, then download all images or selected originals.
+- Parse X, Instagram, and Weibo image posts into a thumbnail grid, then download all images or selected originals. Weibo GIFs retain their GIF format.
+- Weibo supports videos, images/GIFs, and batch image downloads.
 - Pause, resume from partial files, or cancel video downloads. Image downloads can also be cancelled; completed files are kept.
 - Remember the last directory separately for each download mode. Video, audio-only, and image downloads do not overwrite one another's directory settings.
 - Detect supported links from the clipboard, switch to the matching platform page, and start probing when the app regains focus.
@@ -28,6 +29,7 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 | Instagram | Yes | Yes | Yes | Browser cookies are commonly required |
 | Douyin | Yes | Yes | - | Usually exposes a single audio-video stream |
 | Bilibili | Yes | Yes | - | DASH video/audio streams are merged with ffmpeg |
+| Weibo | Yes | Yes | Yes | Images/GIFs support multi-select batch downloads; browser cookies may be required |
 
 “Supported” means that the project contains a parser and download path for the platform. It does not guarantee that every URL works under every account, region, network, or rate-limit condition.
 
@@ -39,7 +41,7 @@ downloadYTB/
 ├── app/
 │   ├── gui.py                 # Window, sidebar, platform pages, download panels
 │   ├── core.py                # yt-dlp probing, format selection, and video control
-│   ├── images.py              # gallery-dl probing and requests-based image downloads
+│   ├── images.py              # gallery-dl / Weibo probing and requests-based image downloads
 │   ├── widgets.py             # Liquid Glass-style Tkinter widgets
 │   ├── theme.py               # Light / dark / system theme handling
 │   ├── settings.py            # JSON settings persistence
@@ -168,6 +170,9 @@ git diff --check
 # X / Instagram image probing, thumbnails, selection, and cancellation
 .venv/bin/python test_gui_flow.py
 .venv/bin/python test_images.py
+
+# Weibo URL and image/GIF batch parsing regression
+.venv/bin/python test_weibo.py
 ~~~
 
 Live tests access real platforms. Failures may be caused by expired URLs, login state, browser-cookie permissions, regional restrictions, network routing, or platform rate limits. Generated screenshots and test downloads are local evidence and should not be committed.

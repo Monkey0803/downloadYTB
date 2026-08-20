@@ -20,7 +20,8 @@ import sys
 from PIL import Image, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from make_icons import ASSETS, center_square, fit_canvas, remove_black_background
+from make_icons import (ASSETS, apply_standard_icon_mask, center_square,
+                        fit_canvas, remove_black_background)
 
 LOGOS = {
     "classic": "app_logo.png",
@@ -60,7 +61,7 @@ def main():
         img = Image.open(src)
         img = center_square(img)
         img = remove_black_background(img)  # 以四角种子色为底色基准去底
-        master = fit_canvas(img)
+        master = apply_standard_icon_mask(fit_canvas(img))
 
         icon_path = os.path.join(OUT_DIR, f"{key}_icon.png")
         small_path = os.path.join(OUT_DIR, f"{key}_512.png")
