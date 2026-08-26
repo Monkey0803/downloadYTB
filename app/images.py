@@ -8,11 +8,14 @@
   中的 MP4/MOV 共用同一套缩略图、多选、批量下载流程。
 """
 
+import json
 import os
+import random
 import re
 import threading
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
+from urllib.parse import urlparse
 import requests
 import yt_dlp
 
@@ -120,6 +123,36 @@ _WEIBO_STATUS_RE = re.compile(
     r"|weibo\.com/0/(?P<zero>\d+))",
     re.IGNORECASE,
 )
+_WEIBO_DESKTOP_STATUS_RE = re.compile(
+    r"weibo\.com/(?:u/)?\d+/(?P<short>[0-9A-Za-z]+)",
+    re.IGNORECASE,
+)
+_WEIBO_BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_WEIBO_REFERER = "https://weibo.com/"
+
+
+def _weibo_base62_to_mid(value: str) -> Optional[str]:
+    """将网页版微博短 ID 转换为状态接口使用的数字 MID。"""
+    if not value or not re.fullmatch(r"[0-9A-Za-z]+", value):
+        return None
+
+    decoded_parts = []
+    for end in range(len(value), 0, -4):
+        part = value[max(0, end - 4):end]
+        number = 0
+        for char in part:
+            number = number * 62 + _WEIBO_BASE62.index(char)
+        decoded_parts.append(str(number))
+
+    decoded_parts.reverse()
+    return decoded_parts[0] + "".join(
+        part.zfill(7) for part in decoded_parts[1:])
+
+
+def _is_weibo_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return (host == "weibo.com" or host.endswith(".weibo.com")
+            or host == "weibo.cn" or host.endswith(".weibo.cn"))
 
 
 def _weibo_status_id(url: str, info: Optional[dict]) -> Optional[str]:
@@ -136,6 +169,10 @@ def _weibo_status_id(url: str, info: Optional[dict]) -> Optional[str]:
             value = entry.get("id") if isinstance(entry, dict) else None
             if value:
                 return str(value)
+
+    match = _WEIBO_DESKTOP_STATUS_RE.search(url or "")
+    if match:
+        return _weibo_base62_to_mid(match.group("short"))
     return None
 
 
@@ -156,11 +193,82 @@ def _weibo_ytdlp_options() -> dict:
 def _weibo_session(ydl: yt_dlp.YoutubeDL) -> requests.Session:
     """把 yt-dlp 生成的微博访客/浏览器 Cookie 转给 requests。"""
     session = requests.Session()
-    session.headers.update({"User-Agent": UA, "Referer": "https://weibo.com/"})
+    session.headers.update({"User-Agent": UA, "Referer": _WEIBO_REFERER})
     for cookie in ydl.cookiejar:
         session.cookies.set(cookie.name, cookie.value,
                             domain=cookie.domain, path=cookie.path)
     return session
+
+
+def _weibo_load_jsonp(text: str) -> dict:
+    """解析微博访客接口返回的 JSONP。"""
+    start = (text or "").find("{")
+    end = (text or "").rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("微博访客接口返回了无效数据")
+    data = json.loads(text[start:end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("微博访客接口返回了无效数据")
+    return data
+
+
+def _weibo_update_visitor_session(session: requests.Session):
+    """建立微博访客 Cookie，供状态接口在未登录时使用。"""
+    user_agent = session.headers.get("User-Agent", _WEIBO_VIDEO_UA)
+    match = re.search(r"Chrome/(\d+)", user_agent)
+    chrome_version = match.group(1) if match else "90"
+    fingerprint = json.dumps({
+        "os": "1",
+        "browser": f"Chrome{chrome_version},0,0,0",
+        "fonts": "undefined",
+        "screenInfo": "1920*1080*24",
+        "plugins": "",
+    }, separators=(",", ":"))
+
+    response = session.post(
+        "https://passport.weibo.com/visitor/genvisitor",
+        data={"cb": "gen_callback", "fp": fingerprint},
+        headers={"Referer": _WEIBO_REFERER}, timeout=(8, 20))
+    response.raise_for_status()
+    visitor_data = _weibo_load_jsonp(response.text).get("data")
+    if not isinstance(visitor_data, dict) or not visitor_data.get("tid"):
+        raise ValueError("微博访客 Cookie 创建失败")
+
+    response = session.get(
+        "https://passport.weibo.com/visitor/visitor",
+        params={
+            "a": "incarnate",
+            "t": visitor_data["tid"],
+            "w": 3 if visitor_data.get("new_tid") else 2,
+            "c": f"{visitor_data.get('confidence', 100):03d}",
+            "gc": "",
+            "cb": "cross_domain",
+            "from": "weibo",
+            "_rand": random.random(),
+        },
+        headers={"Referer": _WEIBO_REFERER}, timeout=(8, 20))
+    response.raise_for_status()
+
+
+def _weibo_status_data(session: requests.Session, status_id: str) -> dict:
+    """读取微博状态；若未携带有效访客 Cookie 则自动补齐后重试。"""
+    response = session.get(
+        "https://weibo.com/ajax/statuses/show",
+        params={"id": status_id}, timeout=(8, 20))
+    response_url = getattr(response, "url", "") or ""
+    if "passport.weibo.com" in response_url:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+        _weibo_update_visitor_session(session)
+        response = session.get(
+            "https://weibo.com/ajax/statuses/show",
+            params={"id": status_id}, timeout=(8, 20))
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError("微博状态接口返回了无效数据")
+    return data
 
 
 def _weibo_media_url(pic_id: str, size: str = "large") -> str:
@@ -251,6 +359,8 @@ def _weibo_video_infos(data: dict) -> List[dict]:
 
 def _weibo_image_type(session: requests.Session, thumb_url: str) -> str:
     """用小缩略图的 magic bytes 判断微博图片是否为 GIF。"""
+    if thumb_url.split("?", 1)[0].lower().endswith(".gif"):
+        return "gif"
     try:
         response = session.get(thumb_url, stream=True, timeout=(5, 15))
         response.raise_for_status()
@@ -285,11 +395,7 @@ def _probe_weibo_images(url: str) -> ImagePost:
 
     session = _weibo_session(ydl)
     try:
-        response = session.get(
-            "https://weibo.com/ajax/statuses/show",
-            params={"id": status_id}, timeout=(8, 20))
-        response.raise_for_status()
-        data = response.json()
+        data = _weibo_status_data(session, status_id)
     except (requests.RequestException, ValueError) as exc:
         raise _probe_error(exc.__class__.__name__, str(exc), url) from exc
 
@@ -298,8 +404,6 @@ def _probe_weibo_images(url: str) -> ImagePost:
 
     pic_ids = data.get("pic_ids") or []
     pic_infos = data.get("pic_infos") or {}
-    if not pic_ids:
-        raise ImageError(i18n.tr("error_no_images", suffix=""))
 
     title = re.sub(r"\s+", " ", data.get("text_raw") or "").strip()
     user = data.get("user") or {}
@@ -309,6 +413,7 @@ def _probe_weibo_images(url: str) -> ImagePost:
     items = []
     video_records = []
     seen_video_urls = set()
+    thumb_by_index = {}
     for index, pic_id in enumerate(pic_ids, start=1):
         meta = pic_infos.get(pic_id) if isinstance(pic_infos, dict) else {}
         meta = meta if isinstance(meta, dict) else {}
@@ -318,8 +423,10 @@ def _probe_weibo_images(url: str) -> ImagePost:
         thumb = (_weibo_meta_url(meta, "thumbnail")
                  or _weibo_meta_url(meta, "bmiddle")
                  or _weibo_media_url(str(pic_id), "mw690"))
-        ext = _weibo_image_type(session, thumb)
+        declared_type = str(meta.get("type") or "").lower()
+        ext = "gif" if declared_type == "gif" else _weibo_image_type(session, thumb)
         filename = f"{mblog_id}_{index}"
+        thumb_by_index[index] = thumb
         items.append(ImageItem(
             url=original,
             thumb_url=thumb,
@@ -334,9 +441,20 @@ def _probe_weibo_images(url: str) -> ImagePost:
         video_url = _weibo_video_url(meta)
         if video_url and video_url not in seen_video_urls:
             seen_video_urls.add(video_url)
-            video_records.append((video_url, index))
+            video_records.append((video_url, index, thumb))
 
     mixed_video_infos = _weibo_video_infos(data)
+    page_info = data.get("page_info") or {}
+    media_info = page_info.get("media_info") if isinstance(page_info, dict) else {}
+    big_pic_info = media_info.get("big_pic_info") if isinstance(media_info, dict) else {}
+    page_thumb = (
+        _weibo_meta_url(page_info, "page_pic")
+        or _weibo_meta_url(big_pic_info, "pic_middle")
+        or _weibo_meta_url(big_pic_info, "pic_big")
+        or _weibo_meta_url(big_pic_info, "pic_small")
+        or (info.get("thumbnail") if isinstance(info, dict) else "")
+        or ""
+    )
     for media_info in mixed_video_infos:
         video_url = _weibo_video_url(media_info)
         if not video_url or video_url in seen_video_urls:
@@ -344,20 +462,24 @@ def _probe_weibo_images(url: str) -> ImagePost:
         seen_video_urls.add(video_url)
         # 单图+单视频是最常见的 Live Photo 形态；多媒体帖则使用独立视频名。
         pair_index = 1 if len(pic_ids) == 1 and len(mixed_video_infos) == 1 else None
-        video_records.append((video_url, pair_index))
+        video_thumb = thumb_by_index.get(pair_index, "") if pair_index else page_thumb
+        video_records.append((video_url, pair_index, video_thumb))
 
-    for video_index, (video_url, pair_index) in enumerate(video_records, start=1):
+    for video_index, (video_url, pair_index, video_thumb) in enumerate(
+            video_records, start=1):
         stem = (f"{mblog_id}_{pair_index}" if pair_index
                 else f"{mblog_id}_video_{video_index}")
-        page_info = data.get("page_info") or {}
         items.append(ImageItem(
             url=video_url,
-            thumb_url=_weibo_meta_url(page_info, "page_pic") or "",
+            thumb_url=video_thumb or page_thumb,
             index=len(items) + 1,
             extension=_weibo_video_extension(video_url),
             filename=stem,
             media_type="video",
         ))
+
+    if not items:
+        raise ImageError(i18n.tr("error_no_images", suffix=""))
 
     return ImagePost(url=url, title=title[:120], author=author, items=items)
 
@@ -367,7 +489,7 @@ def probe_images(url: str) -> ImagePost:
     url = (url or "").strip()
     if not url:
         raise ImageError(i18n.tr("enter_post_link"))
-    if "weibo.com" in url.lower() or "weibo.cn" in url.lower():
+    if _is_weibo_url(url):
         return _probe_weibo_images(url)
 
     # 每次解析前重置 gallery-dl 全局配置，避免残留

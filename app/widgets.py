@@ -520,21 +520,34 @@ class ImagePicker(tk.Frame):
     CELL_H = 128
     THUMB_W = 116
     THUMB_H = 84
-    PAD = 10
+    OUTER_PAD = 10
+    GAP_X = 10
+    GAP_Y = 16
+    VIEWPORT_RADIUS = 14
+    CARD_RADIUS = 14
+    THUMB_RADIUS = 10
 
     def __init__(self, master, on_change=None, height=150, bg_role="CARD"):
         self._bg_role = bg_role
         super().__init__(master, bg=getattr(theme.C(), bg_role))
         self._on_change = on_change
         self._items = []
+        self._scrollbar_visible = False
+        self._pointer_over_canvas = False
         self.canvas = tk.Canvas(self, bg=getattr(theme.C(), bg_role),
                                 highlightthickness=0, bd=0, height=height)
+        self.scrollbar = tk.Scrollbar(self, orient="vertical",
+                                      command=self.canvas.yview, takefocus=0)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda e: self._draw())
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<MouseWheel>", self._on_wheel)
-        self.canvas.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"))
-        self.canvas.bind("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))
+        self.canvas.bind("<Button-4>", self._on_wheel)
+        self.canvas.bind("<Button-5>", self._on_wheel)
+        self.canvas.bind("<Enter>", self._on_pointer_enter)
+        self.canvas.bind("<Leave>", self._on_pointer_leave)
+        self.canvas.bind("<Unmap>", self._on_pointer_leave)
 
     # -- 数据接口 --
 
@@ -561,30 +574,61 @@ class ImagePicker(tk.Frame):
     # -- 绘制 --
 
     def _cols(self):
-        w = self.canvas.winfo_width()
-        return max(1, (w - self.PAD) // (self.CELL_W + self.PAD))
+        return self._cols_for_width(self.canvas.winfo_width())
+
+    def _cols_for_width(self, width):
+        return max(1, (width - 2 * self.OUTER_PAD + self.GAP_X)
+                   // (self.CELL_W + self.GAP_X))
+
+    def _content_height(self, cols):
+        rows = (len(self._items) + cols - 1) // cols
+        return (2 * self.OUTER_PAD + rows * self.CELL_H
+                + max(0, rows - 1) * self.GAP_Y)
+
+    def _set_scrollbar_visible(self, visible):
+        if self._scrollbar_visible == visible:
+            return False
+        self._scrollbar_visible = visible
+        if visible:
+            self.scrollbar.pack(side="right", fill="y", padx=(4, 0))
+        else:
+            self.scrollbar.pack_forget()
+        return True
 
     def _draw(self):
         c = self.canvas
         c.delete("all")
         w = c.winfo_width()
         if w < 8 or not self._items:
+            self._set_scrollbar_visible(False)
             c.configure(scrollregion=(0, 0, 0, 0))
             return
         pal = theme.C()
+        h = c.winfo_height()
+        if h >= 8:
+            draw_round_rect(c, 1, 1, w - 3, h - 3, self.VIEWPORT_RADIUS,
+                            fill=pal.CARD, outline=pal.FIELD_BORDER, width=1,
+                            tags="viewport")
+            c.tag_lower("viewport")
         cols = self._cols()
+        total_h = self._content_height(cols)
+        if self._set_scrollbar_visible(total_h > c.winfo_height()):
+            self.after_idle(self._draw)
+            return
         for i, it in enumerate(self._items):
             row, col = divmod(i, cols)
-            x = self.PAD + col * (self.CELL_W + self.PAD)
-            y = self.PAD + row * (self.CELL_H + self.PAD)
+            x = self.OUTER_PAD + col * (self.CELL_W + self.GAP_X)
+            y = self.OUTER_PAD + row * (self.CELL_H + self.GAP_Y)
             sel = it.get("selected")
             # 选中时整格高亮描边
-            draw_round_rect(c, x - 4, y - 4, x + self.CELL_W + 4, y + self.CELL_H - 6, 12,
+            draw_round_rect(c, x - 2, y - 4, x + self.CELL_W + 2, y + self.CELL_H - 6,
+                            self.CARD_RADIUS,
                             fill=pal.FIELD_BG if sel else "",
                             outline=pal.ACCENT if sel else pal.FIELD_BORDER,
                             width=2 if sel else 1)
             tx = x + (self.CELL_W - self.THUMB_W) / 2
-            draw_round_rect(c, tx, y, tx + self.THUMB_W, y + self.THUMB_H, 8,
+            draw_round_rect(c, tx, y, tx + self.THUMB_W, y + self.THUMB_H,
+                            self.THUMB_RADIUS,
                             fill=pal.THUMB_BG, outline="")
             photo = it.get("photo")
             if photo is not None:
@@ -610,8 +654,6 @@ class ImagePicker(tk.Frame):
             if sub:
                 c.create_text(x + self.CELL_W / 2, y + self.THUMB_H + 28,
                               text=sub, fill=pal.TEXT_SUB, font=it.get("font_small"))
-        rows = (len(self._items) + cols - 1) // cols
-        total_h = self.PAD + rows * (self.CELL_H + self.PAD)
         c.configure(scrollregion=(0, 0, w, total_h))
 
     def _on_click(self, e):
@@ -620,9 +662,14 @@ class ImagePicker(tk.Frame):
         cx = self.canvas.canvasx(e.x)
         cy = self.canvas.canvasy(e.y)
         cols = self._cols()
-        col = int((cx - self.PAD) // (self.CELL_W + self.PAD))
-        row = int((cy - self.PAD) // (self.CELL_H + self.PAD))
+        col = int((cx - self.OUTER_PAD) // (self.CELL_W + self.GAP_X))
+        row = int((cy - self.OUTER_PAD) // (self.CELL_H + self.GAP_Y))
         if col < 0 or col >= cols:
+            return
+        cell_x = self.OUTER_PAD + col * (self.CELL_W + self.GAP_X)
+        cell_y = self.OUTER_PAD + row * (self.CELL_H + self.GAP_Y)
+        if not (cell_x <= cx <= cell_x + self.CELL_W
+                and cell_y <= cy <= cell_y + self.CELL_H):
             return
         idx = row * cols + col
         if 0 <= idx < len(self._items):
@@ -631,12 +678,41 @@ class ImagePicker(tk.Frame):
             if self._on_change:
                 self._on_change()
 
-    def _on_wheel(self, e):
-        delta = e.delta
+    def _on_pointer_enter(self, _event):
+        self._pointer_over_canvas = True
+
+    def _on_pointer_leave(self, _event):
+        self._pointer_over_canvas = False
+
+    def accepts_native_scroll(self):
+        return self._pointer_over_canvas and self._scrollbar_visible
+
+    def scroll_by_delta(self, delta):
+        try:
+            delta = float(delta)
+        except (TypeError, ValueError):
+            return
+        if not delta:
+            return
         if sys.platform == "darwin":
-            self.canvas.yview_scroll(-delta, "units")
+            units = -int(delta)
+            if not units:
+                units = -1 if delta > 0 else 1
+            units = max(-10, min(10, units))
         else:
-            self.canvas.yview_scroll(-delta // 120, "units")
+            units = -1 if delta > 0 else 1
+        self.canvas.yview_scroll(units, "units")
+
+    def scroll_with_wheel(self, event):
+        button = getattr(event, "num", None)
+        if button in (4, 5):
+            self.canvas.yview_scroll(-1 if button == 4 else 1, "units")
+            return
+        self.scroll_by_delta(getattr(event, "delta", 0))
+
+    def _on_wheel(self, event):
+        self.scroll_with_wheel(event)
+        return "break"
 
     def retheme(self):
         bg = getattr(theme.C(), self._bg_role)

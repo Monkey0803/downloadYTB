@@ -636,6 +636,12 @@ class VideoPanel(TFrame):
 class ImagePanel(TFrame):
     """图片下载面板：解析帖子 → 缩略图多选（全选）→ 下载（可取消）。"""
 
+    RESOURCE_CARD_MIN_HEIGHT = 180
+    RESOURCE_CARD_MAX_HEIGHT = 322
+    RESOURCE_CARD_RESERVED_HEIGHT = 342
+    PICKER_CHROME_HEIGHT = 96
+    PICKER_MIN_HEIGHT = 80
+
     def __init__(self, master, app, platform="X", on_redirect=None):
         super().__init__(master, bg_role="BG")
         self.app = app
@@ -648,17 +654,19 @@ class ImagePanel(TFrame):
         self._cancel_event = None
         self._last_paths = []
         self._thumb_epoch = 0  # 解析代数，旧的缩略图线程结果直接丢弃
+        self._resource_card_height = None
 
         self._build()
+        self.bind("<Configure>", self._on_panel_resize, add="+")
 
     def _build(self):
         f = self.app
 
         # —— 卡片 1：链接 ——
-        card1 = GlassCard(self)
-        card1.set_height(96)
-        card1.pack(fill="x", pady=(0, 12))
-        b1 = card1.body
+        self.link_card = GlassCard(self)
+        self.link_card.set_height(96)
+        self.link_card.pack(fill="x", pady=(0, 12))
+        b1 = self.link_card.body
         row = TFrame(b1, bg_role="CARD")
         row.pack(fill="x", pady=(4, 0))
         TLabel(row, text=i18n.tr("post_link"), font=f.f_section, bg_role="CARD",
@@ -674,9 +682,9 @@ class ImagePanel(TFrame):
         self.probe_btn.pack(side="left", padx=(8, 0))
 
         # —— 卡片 2：图片选择 ——
-        card2 = GlassCard(self)
-        card2.pack(fill="both", expand=True, pady=(0, 12))
-        b2 = card2.body
+        self.selection_card = GlassCard(self)
+        self.selection_card.pack(fill="both", expand=True, pady=(0, 12))
+        b2 = self.selection_card.body
         head = TFrame(b2, bg_role="CARD")
         head.pack(fill="x")
         self.selection_label = TLabel(
@@ -686,7 +694,7 @@ class ImagePanel(TFrame):
         self.count_label = TLabel(head, text="", font=f.f_small, bg_role="CARD",
                                   fg_role="TEXT_SUB")
         self.count_label.pack(side="right")
-        self.all_var = tk.BooleanVar(value=True)
+        self.all_var = tk.BooleanVar(value=False)
         self.all_check = CheckPill(head, i18n.tr("select_all"), self.all_var,
                                    command=self._on_all_toggle, font=f.f_btn, width=70)
         self.all_check.pack(side="right", padx=(0, 12))
@@ -699,10 +707,10 @@ class ImagePanel(TFrame):
         self.picker.pack(fill="both", expand=True)
 
         # —— 卡片 3：保存位置 ——
-        card3 = GlassCard(self)
-        card3.set_height(96)
-        card3.pack(fill="x", pady=(0, 14))
-        b3 = card3.body
+        self.save_card = GlassCard(self)
+        self.save_card.set_height(96)
+        self.save_card.pack(fill="x", pady=(0, 14))
+        b3 = self.save_card.body
         dir_row = TFrame(b3, bg_role="CARD")
         dir_row.pack(fill="x", pady=(4, 0))
         TLabel(dir_row, text=i18n.tr("save_location"), font=f.f_section, bg_role="CARD",
@@ -737,6 +745,17 @@ class ImagePanel(TFrame):
                                    font=f.f_sub, bg_role="BG", fg_role="TEXT_SUB")
         self.status_label.pack(side="left", fill="x", expand=True)
         self.status_label.bind("<Configure>", lambda e: self._refresh_status_text())
+
+    def _on_panel_resize(self, _event):
+        available = self.winfo_height() - self.RESOURCE_CARD_RESERVED_HEIGHT
+        card_height = max(self.RESOURCE_CARD_MIN_HEIGHT, min(
+            self.RESOURCE_CARD_MAX_HEIGHT, available))
+        if card_height == self._resource_card_height:
+            return
+        self._resource_card_height = card_height
+        self.selection_card.set_height(card_height)
+        self.picker.canvas.configure(height=max(
+            self.PICKER_MIN_HEIGHT, card_height - self.PICKER_CHROME_HEIGHT))
 
     # ---------- 状态栏 ----------
 
@@ -846,7 +865,7 @@ class ImagePanel(TFrame):
             "media_selection" if mixed else "image_selection"))
         self.post_label.configure(text=desc or i18n.tr(
             "select_media_hint" if mixed else "select_images_hint"))
-        self.download_btn.configure(text=i18n.tr(
+        self.download_btn.set_text(i18n.tr(
             "download_selected_media" if mixed else "download_selected_images"))
 
         items = []
@@ -857,12 +876,12 @@ class ImagePanel(TFrame):
                     "video_label" if it.media_type == "video" else "image_label",
                     index=it.index),
                 "sub": sub.strip(" ·"),
-                "selected": True,
+                "selected": False,
                 "photo": None,
                 "font_small": self.app.f_small,
             })
         self.picker.set_items(items)
-        self.all_var.set(True)
+        self.all_var.set(False)
         self._on_selection_change()
         self._set_status(i18n.tr(
             "probe_success_media" if mixed else "probe_success_images",
@@ -991,6 +1010,20 @@ class ImagePanel(TFrame):
 # ====================================================================
 
 
+def _pack_wrapped_hint(master, app, text):
+    label = TLabel(master, text=text, font=app.f_small, bg_role="BG",
+                   fg_role="TEXT_SUB", anchor="w", justify="left", wraplength=1)
+
+    def update_wraplength(event):
+        wraplength = max(1, event.width - 2)
+        if int(label.cget("wraplength")) != wraplength:
+            label.configure(wraplength=wraplength)
+
+    label.bind("<Configure>", update_wraplength)
+    label.pack(fill="x", pady=(0, 8))
+    return label
+
+
 class PageHeader(TFrame):
     def __init__(self, master, app, title, subtitle):
         super().__init__(master, bg_role="BG")
@@ -1007,10 +1040,9 @@ class VideoPlatformPage(TFrame):
     def __init__(self, master, app, title, subtitle, platform, hint=""):
         super().__init__(master, bg_role="BG")
         PageHeader(self, app, title, subtitle).pack(fill="x", pady=(0, 14))
+        self.hint_label = None
         if hint:
-            TLabel(self, text=hint, font=app.f_small, bg_role="BG",
-                   fg_role="TEXT_SUB", anchor="w", justify="left").pack(
-                fill="x", pady=(0, 8))
+            self.hint_label = _pack_wrapped_hint(self, app, hint)
         self.video_panel = VideoPanel(self, app, platform=platform, show_audio=True)
         self.video_panel.pack(fill="both", expand=True)
 
@@ -1024,6 +1056,7 @@ class MediaPlatformPage(TFrame):
     def __init__(self, master, app, title, subtitle, platform, hint="",
                  show_kind_switch=True):
         super().__init__(master, bg_role="BG")
+        self.platform = platform
         self._show_kind_switch = show_kind_switch
         head_row = TFrame(self, bg_role="BG")
         head_row.pack(fill="x", pady=(0, 14))
@@ -1038,10 +1071,9 @@ class MediaPlatformPage(TFrame):
                 bg_role="BG")
             self.kind_seg.pack(side="right", pady=(6, 0))
 
+        self.hint_label = None
         if hint:
-            TLabel(self, text=hint, font=app.f_small, bg_role="BG",
-                   fg_role="TEXT_SUB", anchor="w", justify="left").pack(
-                fill="x", pady=(0, 8))
+            self.hint_label = _pack_wrapped_hint(self, app, hint)
 
         redirect = self._redirect_panel if platform == "微博" else None
         self.video_panel = VideoPanel(self, app, platform=platform, show_audio=False,
@@ -1356,6 +1388,7 @@ class App(tk.Tk):
         self.show_page("youtube")
         self._native_scroll_monitor = None
         self._native_scroll_pending = 0.0
+        self._native_scroll_target = None
         self._native_scroll_window_title = i18n.tr("app_title")
         # Tk 的滚轮事件不会自动传给 Canvas 的父容器；绑定到
         # 顶层窗口，才能在设置页任意子控件上使用滚轮/触控板。
@@ -1417,20 +1450,31 @@ class App(tk.Tk):
         except Exception:
             self._native_scroll_monitor = None
 
+    def _native_scroll_target_for_current_page(self):
+        if self.current_page == "settings":
+            return self.pages.get("settings")
+        page = self.pages.get(self.current_page)
+        image_panel = getattr(page, "image_panel", None)
+        picker = getattr(image_panel, "picker", None)
+        if picker is not None and picker.accepts_native_scroll():
+            return picker
+        return None
+
     def _on_native_scroll(self, event):
         """AppKit 回调只记录数据，不在回调中调用 Tk。"""
         try:
-            if self.current_page != "settings":
-                return event
             window = event.window()
             if window is None or window.title() != self._native_scroll_window_title:
                 return event
-            # 188 是侧边栏宽度；只让设置页内容区域响应滚动。
             if event.locationInWindow().x < 188:
+                return event
+            target = self._native_scroll_target_for_current_page()
+            if target is None:
                 return event
             delta = float(event.scrollingDeltaY())
             if not delta:
                 return event
+            self._native_scroll_target = target
             self._native_scroll_pending += delta
             return None
         except Exception:
@@ -1440,10 +1484,10 @@ class App(tk.Tk):
         """在 Tk 主线程消费 AppKit 回调积累的滚动量。"""
         delta = self._native_scroll_pending
         self._native_scroll_pending = 0.0
-        if delta and self.current_page == "settings":
-            page = self.pages.get("settings")
-            if page is not None:
-                page.scroll_by_delta(delta)
+        target = self._native_scroll_target
+        self._native_scroll_target = None
+        if delta and target is not None and target.winfo_exists():
+            target.scroll_by_delta(delta)
         if self.winfo_exists():
             self.after(20, self._poll_native_scroll)
 
