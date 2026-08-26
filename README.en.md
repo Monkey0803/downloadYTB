@@ -51,6 +51,7 @@ downloadYTB/
 ├── build/
 │   ├── build_macos.sh         # Builds the macOS .app
 │   ├── build_windows.bat      # Builds the Windows .exe
+│   ├── build_linux.sh         # Builds the Linux executable
 │   ├── make_icons.py          # Generates base icons
 │   └── make_logo_variants.py  # Generates selectable logo variants
 ├── test_*.py                  # Unit, GUI, packaging, and live-network checks
@@ -186,7 +187,7 @@ Live tests access real platforms. Failures may be caused by expired URLs, login 
 
 ## Build distributable applications
 
-PyInstaller is not a cross-compiler: build the macOS .app on macOS and the Windows .exe on Windows.
+PyInstaller is not a cross-compiler: build the macOS .app on macOS, the Windows .exe on Windows, and the Linux executable on Linux.
 
 ### macOS
 
@@ -212,6 +213,18 @@ build\build_windows.bat
 ~~~
 
 Output: <code>dist\VideoDownloader\VideoDownloader.exe</code>.
+
+### Linux
+
+~~~bash
+bash build/build_linux.sh
+~~~
+
+Output: <code>dist/VideoDownloader/VideoDownloader</code>. The target system needs a compatible glibc and graphical desktop environment; GitHub Actions builds the x64 package on Ubuntu 24.04.
+
+### Automatic GitHub Release builds
+
+Pushing a version tag such as <code>v1.3.0</code> starts <code>.github/workflows/release.yml</code>. It builds ZIP assets on macOS arm64, Windows x64, and Linux x64 runners, then creates or updates the matching GitHub Release. The workflow verifies that the tag matches the version in <code>app/__init__.py</code> before uploading assets.
 
 ## Development practices
 

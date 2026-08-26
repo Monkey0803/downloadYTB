@@ -1,0 +1,141 @@
+name: Build release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to build and publish"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build-macos:
+    name: Build macOS arm64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt
+      - name: Verify version tag
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          test "v$(.venv/bin/python -c 'from app import __version__; print(__version__)')" = "$RELEASE_TAG"
+      - name: Build application
+        run: bash build/build_macos.sh
+      - name: Package release asset
+        run: ditto -c -k --sequesterRsrc --keepParent dist/VideoDownloader.app "dist/VideoDownloader-${RELEASE_TAG}-macos-arm64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-arm64
+          path: dist/VideoDownloader-${{ env.RELEASE_TAG }}-macos-arm64.zip
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+      - name: Verify version tag
+        shell: pwsh
+        run: |
+          $tagCommit = git rev-parse "refs/tags/$env:RELEASE_TAG^{commit}"
+          $headCommit = git rev-parse HEAD
+          if ($headCommit -ne $tagCommit) { throw "Checked-out commit does not match tag $env:RELEASE_TAG" }
+          $version = & .\.venv\Scripts\python.exe -c "from app import __version__; print(__version__)"
+          if ("v$version" -ne $env:RELEASE_TAG) { throw "Tag $env:RELEASE_TAG does not match app version $version" }
+      - name: Build application
+        shell: cmd
+        run: call build\build_windows.bat
+      - name: Package release asset
+        shell: pwsh
+        run: Compress-Archive -Path dist\VideoDownloader -DestinationPath "dist\VideoDownloader-$env:RELEASE_TAG-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: dist/VideoDownloader-${{ env.RELEASE_TAG }}-windows-x64.zip
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux x64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Tk runtime and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes python3-tk tk
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt
+          .venv/bin/python -c "import tkinter"
+      - name: Verify version tag
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          test "v$(.venv/bin/python -c 'from app import __version__; print(__version__)')" = "$RELEASE_TAG"
+      - name: Build application
+        run: bash build/build_linux.sh
+      - name: Package release asset
+        working-directory: dist
+        run: zip -r "VideoDownloader-${RELEASE_TAG}-linux-x64.zip" VideoDownloader
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x64
+          path: dist/VideoDownloader-${{ env.RELEASE_TAG }}-linux-x64.zip
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish release assets
+    needs:
+      - build-macos
+      - build-windows
+      - build-linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/*.zip --repo "$GITHUB_REPOSITORY" --clobber

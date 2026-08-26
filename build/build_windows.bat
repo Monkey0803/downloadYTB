@@ -19,6 +19,7 @@ if not exist "%PYTHON%" (
     --add-data "%CD%\assets;assets" ^
     --collect-all imageio_ffmpeg ^
     --collect-all gallery_dl ^
+    --collect-all yt_dlp_ejs ^
     --workpath build\work ^
     --specpath build ^
     main.py

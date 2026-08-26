@@ -51,6 +51,7 @@ downloadYTB/
 ├── build/
 │   ├── build_macos.sh         # 构建 macOS .app
 │   ├── build_windows.bat      # 构建 Windows .exe
+│   ├── build_linux.sh         # 构建 Linux 可执行文件
 │   ├── make_icons.py          # 生成基础图标
 │   └── make_logo_variants.py  # 生成可切换 Logo 变体
 ├── test_*.py                  # 单元、GUI、打包和联网验证脚本
@@ -186,7 +187,7 @@ git diff --check
 
 ## 构建独立应用
 
-PyInstaller 不支持交叉打包：macOS .app 应在 macOS 上构建，Windows .exe 应在 Windows 上构建。
+PyInstaller 不支持交叉打包：macOS .app 应在 macOS 上构建，Windows .exe 应在 Windows 上构建，Linux 可执行文件应在 Linux 上构建。
 
 ### macOS
 
@@ -212,6 +213,18 @@ build\build_windows.bat
 ~~~
 
 产物：<code>dist\VideoDownloader\VideoDownloader.exe</code>。
+
+### Linux
+
+~~~bash
+bash build/build_linux.sh
+~~~
+
+产物：<code>dist/VideoDownloader/VideoDownloader</code>。目标系统需要具备兼容的 glibc 和图形桌面环境；GitHub Actions 使用 Ubuntu 24.04 构建 x64 包。
+
+### GitHub Release 自动构建
+
+推送形如 <code>v1.3.0</code> 的版本 Tag 后，<code>.github/workflows/release.yml</code> 会在 macOS arm64、Windows x64 和 Linux x64 Runner 上分别构建 ZIP 包，并自动创建或更新同名 GitHub Release。工作流会校验 Tag 与 <code>app/__init__.py</code> 中的版本一致，避免上传错版资产。
 
 ## 开发方法
 
