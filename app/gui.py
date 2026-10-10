@@ -1612,6 +1612,9 @@ def open_in_file_manager(path):
 
 
 class App(tk.Tk):
+    DEFAULT_GEOMETRY = "1020x745"
+    MIN_SIZE = (920, 700)
+
     def __init__(self):
         super().__init__()
         self.settings = settings.load()
@@ -1623,8 +1626,10 @@ class App(tk.Tk):
         images.set_cookie_file(self.settings.get("cookie_file", ""))
 
         self.title(i18n.tr("app_title"))
-        self.geometry("1020x745")
-        self.minsize(920, 700)
+        self.minsize(*self.MIN_SIZE)
+        # 恢复上次的窗口尺寸/位置；位置够不着（例如拔掉副屏）时只恢复尺寸。
+        windowing.restore(self, self.settings.get("window_geometry", ""),
+                          self.DEFAULT_GEOMETRY, *self.MIN_SIZE)
         self.configure(bg=theme.C().BG)
         self.apply_app_logo()  # 按持久化设置恢复窗口 + Dock 图标
 
@@ -2046,6 +2051,7 @@ class App(tk.Tk):
         self.after(200, lambda: self._wait_downloads_then_destroy(tries - 1))
 
     def _destroy_app(self):
+        self._save_window_geometry()
         if self._native_scroll_monitor is not None:
             try:
                 NSEvent.removeMonitor_(self._native_scroll_monitor)

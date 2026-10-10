@@ -27,12 +27,13 @@ def language_options():
 
 
 T = {
+    # 窗口标题只保留应用名，平台清单已在侧边栏与各页面标题中体现。
     "app_title": {
-        "zh_CN": "多平台下载器 — YouTube / X / Instagram / 抖音 / 哔哩哔哩 / 微博",
-        "zh_TW": "多平台下載器 — YouTube / X / Instagram / 抖音 / 哔哩哔哩 / 微博",
-        "en": "Multi-Platform Downloader — YouTube / X / Instagram / Douyin / Bilibili / Weibo",
-        "ko": "멀티 플랫폼 다운로더 — YouTube / X / Instagram / Douyin / Bilibili / Weibo",
-        "ja": "マルチプラットフォームダウンローダー — YouTube / X / Instagram / 抖音 / bilibili / Weibo",
+        "zh_CN": "多平台下载器",
+        "zh_TW": "多平台下載器",
+        "en": "Multi-Platform Downloader",
+        "ko": "멀티 플랫폼 다운로더",
+        "ja": "マルチプラットフォームダウンローダー",
     },
     "download_center": {"zh_CN": "下载中心", "zh_TW": "下載中心", "en": "Download Center", "ko": "다운로드 센터", "ja": "ダウンロードセンター"},
     "media_subtitle": {"zh_CN": "多平台音视频 / 图片", "zh_TW": "多平台影音 / 圖片", "en": "Multi-platform video / audio / images", "ko": "멀티 플랫폼 동영상 / 오디오 / 이미지", "ja": "マルチプラットフォーム動画 / 音声 / 画像"},
