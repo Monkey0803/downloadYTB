@@ -371,6 +371,38 @@ def _weibo_video_infos(data: dict) -> List[dict]:
     return infos
 
 
+def _weibo_has_media(data: dict) -> bool:
+    """帖子自身是否携带图片/GIF 或视频。"""
+    if not isinstance(data, dict):
+        return False
+    if data.get("pic_ids"):
+        return True
+    pic_infos = data.get("pic_infos")
+    if isinstance(pic_infos, dict) and pic_infos:
+        return True
+    return bool(_weibo_video_infos(data))
+
+
+def _weibo_media_source(data: dict) -> Optional[dict]:
+    """返回真正承载媒体的帖子数据。
+
+    微博的「转发」帖自身只有一句转发语（text_raw 常为「转发微博」），
+    图片/视频挂在 retweeted_status 上。转发链不会正常嵌套多层，这里仍加
+    深度上限，避免异常数据导致死循环。
+    """
+    current = data
+    for _ in range(4):
+        if not isinstance(current, dict):
+            return None
+        if _weibo_has_media(current):
+            return current
+        nested = current.get("retweeted_status")
+        if not isinstance(nested, dict):
+            return None
+        current = nested
+    return None
+
+
 def _weibo_image_type(session: requests.Session, thumb_url: str) -> str:
     """用小缩略图的 magic bytes 判断微博图片是否为 GIF。"""
     if thumb_url.split("?", 1)[0].lower().endswith(".gif"):
@@ -435,13 +467,22 @@ def _probe_weibo_images(url: str) -> ImagePost:
     if not isinstance(data, dict) or data.get("ok") is False:
         raise ImageError(i18n.tr("error_images_login"))
 
-    pic_ids = data.get("pic_ids") or []
-    pic_infos = data.get("pic_infos") or {}
+    # 转发帖自身没有媒体：图片/视频以及正文归属都在原帖（retweeted_status）。
+    source = _weibo_media_source(data)
+    if source is None:
+        if isinstance(data.get("retweeted_status"), dict):
+            # 转发了原微博，但原帖已删除/无媒体可下载
+            raise ImageError(i18n.tr("error_repost_source_missing"))
+        raise ImageError(i18n.tr("error_no_images", suffix=""))
 
-    title = re.sub(r"\s+", " ", data.get("text_raw") or "").strip()
-    user = data.get("user") or {}
+    pic_ids = source.get("pic_ids") or []
+    pic_infos = source.get("pic_infos") or {}
+
+    title = re.sub(r"\s+", " ", source.get("text_raw") or "").strip()
+    user = source.get("user") or {}
     author = user.get("screen_name") or user.get("nick") or "" \
         if isinstance(user, dict) else ""
+    # 文件名用用户实际粘贴的那条微博 ID，便于和链接对应。
     mblog_id = str(data.get("mblogid") or status_id)
     items = []
     video_records = []
@@ -476,8 +517,8 @@ def _probe_weibo_images(url: str) -> ImagePost:
             seen_video_urls.add(video_url)
             video_records.append((video_url, index, thumb))
 
-    mixed_video_infos = _weibo_video_infos(data)
-    page_info = data.get("page_info") or {}
+    mixed_video_infos = _weibo_video_infos(source)
+    page_info = source.get("page_info") or {}
     media_info = page_info.get("media_info") if isinstance(page_info, dict) else {}
     big_pic_info = media_info.get("big_pic_info") if isinstance(media_info, dict) else {}
     page_thumb = (

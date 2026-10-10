@@ -306,6 +306,140 @@ def test_weibo_mixed_media_renders_after_probe():
     panel._load_thumbnails.assert_called_once_with(post)
 
 
+def test_weibo_repost_uses_media_from_retweeted_status():
+    """转发帖自身没有图片，媒体挂在 retweeted_status 上。"""
+    class RepostSession(_Session):
+        def get(self, url, **kwargs):
+            if "statuses/show" in url:
+                return _Response({
+                    "id": 5346331435993492,
+                    "mblogid": "Rjri7p9be",
+                    "text_raw": "转发微博",
+                    "user": {"screen_name": "转发的人"},
+                    "pic_ids": [],
+                    "retweeted_status": {
+                        "mblogid": "RjqpX88V3",
+                        "text_raw": "坐你脸上可以吗",
+                        "user": {"screen_name": "她们很撩人"},
+                        "pic_ids": ["pic1"],
+                        "pic_infos": {
+                            "pic1": {
+                                "type": "gif",
+                                "original": {
+                                    "url": "https://wx1.sinaimg.cn/large/pic1.gif",
+                                },
+                                "thumbnail": {
+                                    "url": "https://wx1.sinaimg.cn/mw690/pic1.gif",
+                                },
+                            },
+                        },
+                    },
+                })
+            return _Response({})
+
+    old_ydl = images.yt_dlp.YoutubeDL
+    old_session = images._weibo_session
+    old_type = images._weibo_image_type
+    try:
+        images.yt_dlp.YoutubeDL = _YDL
+        images._weibo_session = lambda ydl: RepostSession()
+        images._weibo_image_type = lambda session, url: "jpg"
+        post = images.probe_images("https://weibo.com/5571216925/Rjri7p9be")
+    finally:
+        images.yt_dlp.YoutubeDL = old_ydl
+        images._weibo_session = old_session
+        images._weibo_image_type = old_type
+
+    # 正文与作者取自原帖（媒体实际归属），文件名沿用用户粘贴的那条微博
+    assert post.author == "她们很撩人"
+    assert post.title == "坐你脸上可以吗"
+    assert [item.filename for item in post.items] == ["Rjri7p9be_1"]
+    assert post.items[0].extension == "gif"
+    assert post.items[0].url == "https://wx1.sinaimg.cn/large/pic1.gif"
+
+
+def test_weibo_repost_without_original_reports_specific_error():
+    """转发帖但原微博已删除：给出针对性的提示，而不是笼统的「没有图片」。"""
+    class DeletedSourceSession(_Session):
+        def get(self, url, **kwargs):
+            if "statuses/show" in url:
+                return _Response({
+                    "id": 1,
+                    "mblogid": "AbCd",
+                    "text_raw": "转发微博",
+                    "user": {"screen_name": "转发的人"},
+                    "pic_ids": [],
+                    "retweeted_status": {"deleted": "1"},
+                })
+            return _Response({})
+
+    old_ydl = images.yt_dlp.YoutubeDL
+    old_session = images._weibo_session
+    try:
+        images.yt_dlp.YoutubeDL = _YDL
+        images._weibo_session = lambda ydl: DeletedSourceSession()
+        try:
+            images.probe_images("https://weibo.com/5571216925/Rjri7p9be")
+        except images.ImageError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("expected ImageError")
+    finally:
+        images.yt_dlp.YoutubeDL = old_ydl
+        images._weibo_session = old_session
+
+    assert message == i18n.tr("error_repost_source_missing")
+
+
+def test_weibo_repost_of_video_uses_retweeted_status_video():
+    """转发原帖是视频时，也要从 retweeted_status 里拿到视频。"""
+    class RepostVideoSession(_Session):
+        def get(self, url, **kwargs):
+            if "statuses/show" in url:
+                return _Response({
+                    "id": 1,
+                    "mblogid": "RepostV",
+                    "text_raw": "转发微博",
+                    "user": {"screen_name": "转发的人"},
+                    "pic_ids": [],
+                    "retweeted_status": {
+                        "mblogid": "OrigV",
+                        "text_raw": "原视频",
+                        "user": {"screen_name": "原作者"},
+                        "pic_ids": [],
+                        "page_info": {
+                            "object_type": "video",
+                            "media_info": {
+                                "mp4_hd_url": "https://f.video.weibocdn.com/a.mp4",
+                                "big_pic_info": {
+                                    "pic_middle": {
+                                        "url": "https://wx4.sinaimg.cn/or360/a.jpg",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                })
+            return _Response({})
+
+    old_ydl = images.yt_dlp.YoutubeDL
+    old_session = images._weibo_session
+    try:
+        images.yt_dlp.YoutubeDL = _YDL
+        images._weibo_session = lambda ydl: RepostVideoSession()
+        post = images.probe_images("https://weibo.com/5571216925/RepostV")
+    finally:
+        images.yt_dlp.YoutubeDL = old_ydl
+        images._weibo_session = old_session
+
+    assert post.has_video
+    assert post.author == "原作者"
+    assert [(item.media_type, item.filename) for item in post.items] == [
+        ("video", "RepostV_video_1"),
+    ]
+    assert post.items[0].url == "https://f.video.weibocdn.com/a.mp4"
+
+
 if __name__ == "__main__":
     test_urls()
     test_weibo_media_type_is_detected_from_url()
@@ -317,4 +451,7 @@ if __name__ == "__main__":
     test_weibo_mixed_media_keeps_live_photo_pair_name()
     test_weibo_gif_mp4_keeps_both_formats_with_shared_thumbnail()
     test_weibo_mixed_media_renders_after_probe()
+    test_weibo_repost_uses_media_from_retweeted_status()
+    test_weibo_repost_without_original_reports_specific_error()
+    test_weibo_repost_of_video_uses_retweeted_status_video()
     print("PASS: Weibo URL and image/GIF parsing")
