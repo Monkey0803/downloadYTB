@@ -1263,8 +1263,8 @@ class SettingsPage(TFrame):
         card3.set_height(310)
         card3.pack(fill="x", pady=(0, 12))
         b3 = card3.body
-        self._cookie_card = card3
-        self._cookie_card_body = b3
+        self._fit_cards = {}
+        self._card_heights = {}
         TLabel(b3, text=i18n.tr("browser_cookie"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         row3 = TFrame(b3, bg_role="CARD")
@@ -1334,6 +1334,7 @@ class SettingsPage(TFrame):
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         _pack_wrapped_hint(bk, app, i18n.tr("shortcuts_hint"),
                            bg_role="CARD", pady=(8, 0))
+        self._track_card("shortcuts", card_keys, bk)
 
         # —— 诊断与反馈 ——
         card_diag = GlassCard(self._scroll_body)
@@ -1353,6 +1354,7 @@ class SettingsPage(TFrame):
         self.diag_status.pack(side="left", padx=(10, 0))
         _pack_wrapped_hint(bd, app, i18n.tr("diagnostics_hint"),
                            bg_role="CARD", pady=(10, 0))
+        self._track_card("diagnostics", card_diag, bd)
 
         self._bind_scroll_events()
 
@@ -1365,21 +1367,33 @@ class SettingsPage(TFrame):
         """
         self.after_idle(self._refresh_cookie_status)
 
-    def _fit_cookie_card(self):
-        """按内容实际高度调整 Cookie 卡片高度。"""
-        body = getattr(self, "_cookie_card_body", None)
-        card = getattr(self, "_cookie_card", None)
-        if body is None or card is None:
+    def _track_card(self, name, card, body):
+        """登记一张按内容自适应高度的卡片。
+
+        说明文案的换行行数随语言与窗口宽度变化，固定高度会裁切（英文/日文
+        尤其明显），所以这里实测内容高度再回写卡片高度。
+        """
+        self._fit_cards[name] = (card, body)
+        body.bind("<Configure>", lambda _e, n=name: self._fit_card(n), add="+")
+        self.after_idle(lambda n=name: self._fit_card(n))
+
+    def _fit_card(self, name):
+        entry = self._fit_cards.get(name)
+        if entry is None:
             return
+        card, body = entry
         try:
             body.update_idletasks()
             needed = body.winfo_reqheight() + 34  # 卡片上下各 16px 内边距 + 描边
         except tk.TclError:
             # 切换语言会重建整个设置页，延迟回调可能落在已销毁的控件上。
             return
-        if needed != getattr(self, "_cookie_card_height", None):
-            self._cookie_card_height = needed
+        if needed != self._card_heights.get(name):
+            self._card_heights[name] = needed
             card.set_height(needed)
+
+    def _fit_cookie_card(self):
+        self._fit_card("cookie")
 
     # ---------- Cookie 体检 / 诊断 ----------
 
@@ -1477,6 +1491,7 @@ class SettingsPage(TFrame):
         self.clipboard_append(report)
         self.diag_status.set_fg_role("OK")
         self.diag_status.configure(text=i18n.tr("diagnostics_copied"))
+        self._fit_card("diagnostics")
 
     def _walk_widgets(self, widget=None):
         """遍历设置页控件，确保鼠标停在任意控件上都能滚动。"""
