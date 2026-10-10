@@ -391,6 +391,33 @@ def test_weibo_repost_without_original_reports_specific_error():
     assert message == i18n.tr("error_repost_source_missing")
 
 
+def test_probe_failure_clears_previous_results():
+    """解析失败必须清空旧帖子结果，否则会误下载到上一个帖子的媒体。"""
+    panel = Mock()
+    panel._post = object()
+    panel._busy = True
+    panel._thumb_epoch = 3
+    panel.app.f_small = None
+
+    ImagePanel._probe_failed(panel, "该帖子中没有解析到图片")
+
+    assert panel._busy is False
+    panel._clear_results.assert_called_once_with()
+    panel._set_status.assert_called_once_with("该帖子中没有解析到图片", error=True)
+
+    # 清空逻辑本身的效果
+    panel.reset_mock()
+    panel._post = object()
+    panel._thumb_epoch = 3
+    ImagePanel._clear_results(panel)
+
+    assert panel._post is None
+    assert panel._thumb_epoch == 4  # 旧缩略图线程结果作废
+    panel.picker.set_items.assert_called_once_with([])
+    panel._on_selection_change.assert_called_once_with()
+    panel.all_var.set.assert_called_once_with(False)
+
+
 def test_weibo_repost_of_video_uses_retweeted_status_video():
     """转发原帖是视频时，也要从 retweeted_status 里拿到视频。"""
     class RepostVideoSession(_Session):
@@ -454,4 +481,5 @@ if __name__ == "__main__":
     test_weibo_repost_uses_media_from_retweeted_status()
     test_weibo_repost_without_original_reports_specific_error()
     test_weibo_repost_of_video_uses_retweeted_status_video()
+    test_probe_failure_clears_previous_results()
     print("PASS: Weibo URL and image/GIF parsing")

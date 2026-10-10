@@ -847,9 +847,25 @@ class ImagePanel(TFrame):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _clear_results(self):
+        """清空上一次的解析结果。
+
+        解析失败时如果保留旧帖子的媒体列表，用户会看到「旧内容 + 新报错」，
+        容易误勾选并下载到上一个帖子的媒体。
+        """
+        self._post = None
+        self._thumb_epoch += 1  # 丢弃上一次解析遗留的缩略图线程结果
+        self.picker.set_items([])
+        self.all_var.set(False)
+        self.post_label.configure(text=i18n.tr("select_images_hint"))
+        self.selection_label.configure(text=i18n.tr("image_selection"))
+        self.download_btn.set_text(i18n.tr("download_selected_images"))
+        self._on_selection_change()
+
     def _probe_failed(self, msg):
         self._busy = False
         self.probe_btn.configure_state("normal")
+        self._clear_results()
         self._set_status(msg, error=True)
 
     def _probe_done(self, post):
