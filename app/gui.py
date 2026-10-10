@@ -545,6 +545,7 @@ class VideoPanel(TFrame):
                     if percent is not None:
                         self._last_percent = percent
                         self.progress.set(percent)
+                        _dock_progress(self.app, percent)
                         self._set_status(i18n.tr(
                             "downloading_percent", percent=percent,
                             speed=speed_text, eta=eta_text))
@@ -606,11 +607,13 @@ class VideoPanel(TFrame):
     def _download_cancelled(self):
         self._reset_after_download()
         self.progress.set(0)
+        _dock_clear(self.app)
         self._set_status(i18n.tr("cancelled_cleaned"))
 
     def _download_failed(self, msg):
         self._reset_after_download()
         self.progress.set(0)
+        _dock_clear(self.app)
         self._set_status(msg, error=True)
 
     def _download_done(self, path):
@@ -618,6 +621,7 @@ class VideoPanel(TFrame):
         self._last_file = path
         self.open_btn.configure_state("normal")
         self.progress.set(0)
+        _dock_done(self.app)
         self._set_status(i18n.tr("download_complete"), ok=True, filename=os.path.basename(path))
 
     def on_open_folder(self):
@@ -964,6 +968,7 @@ class ImagePanel(TFrame):
                 if cancel_event.is_set():
                     return
                 self.progress.set(percent)
+                _dock_progress(self.app, percent)
                 self._set_status(text)
             self.after(0, update)
 
@@ -1001,12 +1006,14 @@ class ImagePanel(TFrame):
         done = len(self._last_paths)
         self._reset_after_download()
         self.progress.set(0)
+        _dock_clear(self.app)
         suffix = i18n.tr("completed_images_kept", done=done) if done else ""
         self._set_status(i18n.tr("cancelled_images") + suffix)
 
     def _download_failed(self, msg):
         self._reset_after_download()
         self.progress.set(0)
+        _dock_clear(self.app)
         self._set_status(msg, error=True)
 
     def _download_done(self, paths):
@@ -1014,6 +1021,7 @@ class ImagePanel(TFrame):
         self._reset_after_download()
         self.progress.set(0)
         self.open_btn.configure_state("normal")
+        _dock_done(self.app)
         self._set_status(i18n.tr("images_complete", n=len(paths),
                                  folder=os.path.basename(os.path.dirname(paths[0]))),
                          ok=True)
@@ -1679,6 +1687,24 @@ class SettingsPage(TFrame):
 # ====================================================================
 
 
+def _dock_progress(app, percent):
+    """下载进度写入 Dock 角标（用户在设置里关闭或非 macOS 时跳过）。"""
+    if app.dock_status_enabled():
+        dock.set_progress(percent)
+
+
+def _dock_done(app):
+    """完成提示：角标 ✓ + 必要时弹跳 Dock。"""
+    if app.dock_status_enabled():
+        dock.set_done()
+
+
+def _dock_clear(app):
+    """清除 Dock 角标。"""
+    if app.dock_status_enabled():
+        dock.clear()
+
+
 def _active_panel(page):
     """返回页面当前可见的面板（视频或图片）。
 
@@ -1772,6 +1798,10 @@ class App(tk.Tk):
 
         self.after(300, self._check_clipboard)
         self.bind("<FocusIn>", self._on_focus_in)
+
+    def dock_status_enabled(self):
+        """是否把进度/完成状态写到 Dock 角标（用户可关闭，且仅 macOS 有效）。"""
+        return bool(self.settings.get("dock_status", True)) and dock.enabled_platform()
 
     def default_save_dir(self, key=None):
         """返回指定下载方式的目录，未单独设置时回退到全局默认目录。"""
@@ -2245,6 +2275,8 @@ class App(tk.Tk):
 
     def _on_focus_in(self, event):
         if event.widget is self:
+            # 回到应用就该清掉 Dock 上的进度/完成角标，避免长期残留
+            _dock_clear(self)
             self._check_clipboard()
 
     def _check_clipboard(self):

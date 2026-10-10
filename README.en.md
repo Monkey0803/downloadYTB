@@ -22,6 +22,8 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - Keyboard shortcuts: ⌘↩ probe, ⌘L focus the URL field, ⌘, open Settings, Esc cancel an in-progress task.
 - Settings checks whether cookies can actually be read and offers an "Open System Settings" shortcut or a cookies.txt alternative when they cannot.
 - One-click diagnostic copy (versions, OS, cookie status, last error) for pasting into an issue; it contains no personal paths or cookie contents.
+- Cookies can be configured per platform (for example only Instagram), keeping the other platforms anonymous.
+- On macOS the Dock badge shows download progress, turns into ✓ on completion, and the icon bounces once when the app is in the background (can be turned off in Settings).
 - ffmpeg is supplied through imageio-ffmpeg; a separate ffmpeg installation is normally unnecessary.
 
 ## Supported platforms
