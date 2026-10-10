@@ -18,6 +18,10 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - System, light, and dark themes.
 - Simplified Chinese, Traditional Chinese, English, Korean, and Japanese UI languages; the selection is persisted in Settings.
 - A macOS status-bar item plus runtime Dock/window logo switching. macOS-only menu-bar code is disabled on Windows and Linux.
+- Remembers the window size and position, and falls back to a visible area when a saved position becomes unreachable (for example after unplugging an external display).
+- Keyboard shortcuts: ⌘↩ probe, ⌘L focus the URL field, ⌘, open Settings, Esc cancel an in-progress task.
+- Settings checks whether cookies can actually be read and offers an "Open System Settings" shortcut or a cookies.txt alternative when they cannot.
+- One-click diagnostic copy (versions, OS, cookie status, last error) for pasting into an issue; it contains no personal paths or cookie contents.
 - ffmpeg is supplied through imageio-ffmpeg; a separate ffmpeg installation is normally unnecessary.
 
 ## Supported platforms

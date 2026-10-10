@@ -1600,6 +1600,26 @@ class SettingsPage(TFrame):
 # ====================================================================
 
 
+def _active_panel(page):
+    """返回页面当前可见的面板（视频或图片）。
+
+    MediaPlatformPage 用 kind_var 在视频/图片面板间切换，快捷键与状态记录
+    都要作用在当前真正可见的那个面板上。
+    """
+    if page is None:
+        return None
+    kind = getattr(page, "kind_var", None)
+    if kind is not None:
+        return page.video_panel if kind.get() == "video" else page.image_panel
+    return getattr(page, "video_panel", None)
+
+
+def _panel_url_entry(panel):
+    """取面板里链接输入框的内层 tk.Entry（RoundEntry 是 Canvas 包装）。"""
+    round_entry = getattr(panel, "url_entry", None)
+    return getattr(round_entry, "entry", None) if round_entry is not None else None
+
+
 def open_in_file_manager(path):
     if not path:
         return
@@ -1646,6 +1666,7 @@ class App(tk.Tk):
         self.bind_all("<MouseWheel>", self._on_mouse_wheel, add="+")
         self.bind_all("<Button-4>", self._on_mouse_wheel, add="+")
         self.bind_all("<Button-5>", self._on_mouse_wheel, add="+")
+        self._bind_shortcuts()
         self._install_native_scroll_monitor()
 
         # macOS：menubar 常驻图标；启用后关闭窗口仅隐藏，应用保留在状态栏
@@ -2060,6 +2081,84 @@ class App(tk.Tk):
         if self.menubar is not None:
             self.menubar.remove()
         self.destroy()
+
+    # ---------- 窗口几何与快捷键 ----------
+
+    def _save_window_geometry(self):
+        """记录窗口尺寸/位置，下次启动恢复。"""
+        try:
+            # 隐藏（macOS 上关窗只是 withdraw）或最大化时不要覆盖用户的手动尺寸
+            if self.state() != "normal":
+                return
+            geometry = self.geometry()
+        except tk.TclError:
+            return
+        if not geometry or geometry == self.settings.get("window_geometry"):
+            return
+        self.settings["window_geometry"] = geometry
+        settings.save(self.settings)
+
+    def _bind_shortcuts(self):
+        """全局快捷键。
+
+        ⌘V 不在这里绑定：Tk 的 Entry 已由系统虚拟事件 <<Paste>> 处理，
+        再绑一次会破坏输入框与其它控件的正常粘贴。
+        """
+        bindings = (
+            ("<Command-Return>", self._shortcut_probe),
+            ("<Control-Return>", self._shortcut_probe),
+            ("<Command-l>", self._shortcut_focus_url),
+            ("<Control-l>", self._shortcut_focus_url),
+            ("<Command-comma>", self._shortcut_settings),
+            ("<Escape>", self._shortcut_cancel),
+        )
+        for sequence, handler in bindings:
+            self.bind_all(sequence, handler, add="+")
+
+    def _current_page(self):
+        return self.pages.get(self.current_page)
+
+    def _shortcut_probe(self, event=None):
+        """⌘↩：对当前页面的链接立刻解析。"""
+        panel = _active_panel(self._current_page())
+        probe = getattr(panel, "on_probe", None)
+        if callable(probe):
+            probe()
+            return "break"
+        return None
+
+    def _shortcut_focus_url(self, event=None):
+        """⌘L：把焦点放到链接输入框并全选，便于直接覆盖粘贴。"""
+        panel = _active_panel(self._current_page())
+        entry = _panel_url_entry(panel)
+        if entry is None:
+            return None
+        entry.focus_set()
+        try:
+            entry.selection_range(0, "end")
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _shortcut_settings(self, event=None):
+        """⌘,：打开设置页（macOS 习惯用法）。"""
+        self.show_page("settings")
+        return "break"
+
+    def _shortcut_cancel(self, event=None):
+        """Esc：取消进行中的解析或下载（仅在确实忙碌时接管）。"""
+        panel = _active_panel(self._current_page())
+        if panel is None:
+            return None
+        busy = any(getattr(panel, flag, False)
+                   for flag in ("_busy", "_downloading", "_paused"))
+        if not busy:
+            return None
+        cancel = getattr(panel, "on_cancel", None)
+        if callable(cancel):
+            cancel()
+            return "break"
+        return None
 
     # ---------- 剪贴板 ----------
 

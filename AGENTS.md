@@ -44,7 +44,7 @@ Use Python 3 style, four-space indentation, descriptive `snake_case` functions a
 
 ## Testing Guidelines
 
-Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local changes. GUI scripts such as `test_smoke_ui.py` require Tk; `test_core.py`, `test_images.py`, and several GUI flows use live services and may require valid URLs, login cookies, and network access. Use a dedicated test download directory and never include private URLs or cookies in fixtures.
+Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local changes. The offline suite is `test_i18n.py`, `test_save_dir_sync.py`, `test_weibo.py`, `test_browser_cookies.py`, `test_audio_options.py`, `test_windowing.py`, `test_diagnostics.py`, and `test_shortcuts.py`; all of them run without network access, and the last three need no Tk except `test_shortcuts.py`, which creates a real window and therefore patches `settings.load`/`settings.save` so it cannot touch the user's own `settings.json`. GUI scripts such as `test_smoke_ui.py` require Tk; `test_core.py`, `test_images.py`, and several GUI flows use live services and may require valid URLs, login cookies, and network access. Use a dedicated test download directory and never include private URLs or cookies in fixtures.
 
 ## Commits and Pull Requests
 
