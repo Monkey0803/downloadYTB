@@ -197,6 +197,32 @@ def _base_opts(with_cookies: bool = True, platform: Optional[str] = None) -> dic
     return opts
 
 
+def subtitle_options(langs=None) -> dict:
+    """构造 yt-dlp 的字幕下载参数。
+
+    同时开启人工字幕与自动字幕：绝大多数 YouTube 视频只有自动字幕。
+
+    语言列表只在明确给出时使用，并且**显式过滤掉 yt-dlp 的 "all"**：配合
+    writeautomaticsub，它会把上百种自动字幕全部拉下来，几乎不可能是本意。
+    过滤后为空就回落到默认语言。
+    """
+    if isinstance(langs, str):
+        langs = [part.strip() for part in langs.split(",")]
+    cleaned = []
+    for lang in (langs or []):
+        text = str(lang).strip()
+        if text and text.lower() != "all":
+            cleaned.append(text)
+    if not cleaned:
+        cleaned = list(DEFAULT_SUBTITLE_LANGS)
+    return {
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": cleaned,
+        "subtitlesformat": "srt/best",
+    }
+
+
 def _wrap_error(exc: Exception) -> DownloadError:
     msg = str(exc)
     # Cookie 读取失败要单独识别：yt-dlp 因为 os.walk 静默吞掉权限错误，
@@ -563,6 +589,8 @@ def download_video(
     progress: Optional[ProgressCallback] = None,
     cancel_event: Optional[threading.Event] = None,
     pause_event: Optional[threading.Event] = None,
+    subtitles: bool = False,
+    subtitle_langs=None,
 ) -> str:
     """下载视频（指定最大清晰度），由 ffmpeg 合并为单个 mp4，返回文件路径。
 
@@ -585,6 +613,8 @@ def download_video(
 
     seen_files: set = set()
     opts = _base_opts(platform=platforms.detect(url))
+    if subtitles:
+        opts.update(subtitle_options(subtitle_langs))
     opts.update(
         {
             "format": fmt,

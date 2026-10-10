@@ -610,6 +610,11 @@ class VideoPanel(TFrame):
                        else self._height_for_label(self.quality_var.get())),
             "audio_bitrate": audio_option.bitrate_kbps if audio_option else 192,
             "audio_format_id": audio_option.format_id if audio_option else None,
+            "audio_format": self._audio_format(),
+            "subtitles": (self.mode_var.get() != "audio"
+                          and self.platform == "YouTube"
+                          and bool(self.subtitle_var.get())),
+            "subtitle_langs": self.app.settings.get("subtitle_langs", ""),
         }
         self._last_file = None
         self._last_percent = 0.0
@@ -682,13 +687,16 @@ class VideoPanel(TFrame):
                                                cancel_event=cancel_event,
                                                pause_event=pause_event,
                                                bitrate_kbps=p["audio_bitrate"],
-                                               format_id=p["audio_format_id"])
+                                               format_id=p["audio_format_id"],
+                                               audio_format=p["audio_format"])
                 else:
                     path = core.download_video(p["url"], height=p["height"],
                                                save_dir=p["save_dir"],
                                                progress=on_progress,
                                                cancel_event=cancel_event,
-                                               pause_event=pause_event)
+                                               pause_event=pause_event,
+                                               subtitles=p["subtitles"],
+                                               subtitle_langs=p["subtitle_langs"])
             except core.DownloadCancelled:
                 self.after(0, self._download_cancelled)
             except core.DownloadPaused as exc:
@@ -1494,20 +1502,54 @@ class SettingsPage(TFrame):
                            bg_role="CARD", pady=(12, 0))
         self._track_card("platform", card_plat, bp)
 
-        # —— 下载提示（Dock）——
+        # —— 下载行为：跳过重复图片 + Dock 提示 ——
         card_dock = GlassCard(self._scroll_body)
-        card_dock.set_height(110)
+        card_dock.set_height(190)
         card_dock.pack(fill="x", pady=(0, 12))
         bdk = card_dock.body
         TLabel(bdk, text=i18n.tr("download_feedback"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+
+        self.skip_var = tk.BooleanVar(
+            value=bool(app.settings.get("skip_existing_images", True)))
+        self.skip_var.trace_add("write", lambda *a: self._on_skip_existing_change())
+        CheckPill(bdk, i18n.tr("skip_existing_images"), self.skip_var,
+                  font=f.f_btn, bg_role="CARD",
+                  width=_check_pill_width(f.f_btn, i18n.tr("skip_existing_images"))
+                  ).pack(anchor="w", pady=(10, 0))
+        _pack_wrapped_hint(bdk, app, i18n.tr("skip_existing_hint"),
+                           bg_role="CARD", pady=(6, 0))
+
         self.dock_var = tk.BooleanVar(value=bool(app.settings.get("dock_status", True)))
         self.dock_var.trace_add("write", lambda *a: self._on_dock_status_change())
         CheckPill(bdk, i18n.tr("dock_status"), self.dock_var,
-                  font=f.f_btn, width=340, bg_role="CARD").pack(anchor="w", pady=(10, 0))
+                  font=f.f_btn, bg_role="CARD",
+                  width=_check_pill_width(f.f_btn, i18n.tr("dock_status"))
+                  ).pack(anchor="w", pady=(10, 0))
         _pack_wrapped_hint(bdk, app, i18n.tr("dock_status_hint"),
-                           bg_role="CARD", pady=(8, 0))
+                           bg_role="CARD", pady=(6, 0))
         self._track_card("dock", card_dock, bdk)
+
+        # —— 字幕（仅视频下载时可用）——
+        card_sub = GlassCard(self._scroll_body)
+        card_sub.set_height(140)
+        card_sub.pack(fill="x", pady=(0, 12))
+        bs = card_sub.body
+        TLabel(bs, text=i18n.tr("subtitles"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        sub_row = TFrame(bs, bg_role="CARD")
+        sub_row.pack(fill="x", pady=(8, 0))
+        TLabel(sub_row, text=i18n.tr("subtitle_langs"), font=f.f_body,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+        self.subtitle_langs_var = tk.StringVar(
+            value=app.settings.get("subtitle_langs") or ",".join(core.DEFAULT_SUBTITLE_LANGS))
+        self.subtitle_langs_var.trace_add(
+            "write", lambda *a: self._on_subtitle_langs_change())
+        RoundEntry(sub_row, textvariable=self.subtitle_langs_var, font=f.f_body).pack(
+            side="left", fill="x", expand=True)
+        _pack_wrapped_hint(bs, app, i18n.tr("subtitle_langs_hint"),
+                           bg_role="CARD", pady=(8, 0))
+        self._track_card("subtitles", card_sub, bs)
 
         # —— 快捷键 ——
         card_keys = GlassCard(self._scroll_body)
@@ -1792,6 +1834,16 @@ class SettingsPage(TFrame):
         self.app.settings["platform_cookies"] = mapping
         settings.save(self.app.settings)
         browser_cookies.set_platform_overrides(mapping)
+
+    def _on_skip_existing_change(self):
+        self.app.settings["skip_existing_images"] = bool(self.skip_var.get())
+        settings.save(self.app.settings)
+
+    def _on_subtitle_langs_change(self):
+        """字幕语言：留空时回落到默认语言，避免 yt-dlp 的 "all" 拉上百种自动字幕。"""
+        value = (self.subtitle_langs_var.get() or "").strip()
+        self.app.settings["subtitle_langs"] = value
+        settings.save(self.app.settings)
 
     def _on_dock_status_change(self):
         self.app.settings["dock_status"] = bool(self.dock_var.get())
