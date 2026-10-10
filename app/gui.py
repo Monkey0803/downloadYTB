@@ -218,6 +218,26 @@ class VideoPanel(TFrame):
                                          font=f.f_btn, width=196)
         self.quality_select.pack(side="left")
 
+        # 第二行：仅音频时显示目标格式，YouTube 视频时显示字幕开关
+        self.opt_row2 = TFrame(b2, bg_role="CARD")
+        self.format_label = TLabel(self.opt_row2, text=i18n.tr("audio_format"),
+                                   font=f.f_body, bg_role="CARD", fg_role="TEXT_SUB")
+        self.format_var = tk.StringVar(value=self.app.settings.get(
+            "audio_format") or core.DEFAULT_AUDIO_FORMAT)
+        self.format_var.trace_add("write", lambda *a: self._on_audio_format_change())
+        self.format_select = PillSelect(
+            self.opt_row2, self.format_var,
+            values=[fmt.upper() for fmt in core.AUDIO_FORMATS],
+            font=f.f_btn, width=110)
+        self.subtitle_var = tk.BooleanVar(
+            value=bool(self.app.settings.get("subtitles_enabled", False)))
+        self.subtitle_var.trace_add("write", lambda *a: self._on_subtitle_toggle())
+        self.subtitle_check = CheckPill(
+            self.opt_row2, i18n.tr("download_subtitles"), self.subtitle_var,
+            font=f.f_btn, width=_check_pill_width(f.f_btn, i18n.tr("download_subtitles")),
+            bg_role="CARD")
+        self._refresh_option_visibility()
+
         # —— 卡片 3：保存位置 ——
         card3 = GlassCard(self)
         card3.set_height(102)
@@ -290,7 +310,6 @@ class VideoPanel(TFrame):
 
     def _on_mode_change(self):
         audio = self.mode_var.get() == "audio"
-        self.quality_label.configure(text=i18n.tr("bitrate" if audio else "quality"))
         if self._info is not None:
             options = self._info.audio_options if audio else self._info.qualities
             values = [option.display for option in options]
@@ -298,13 +317,115 @@ class VideoPanel(TFrame):
                 values = [i18n.tr("probe_first")]
             self.quality_select.set_values(values)
             self.quality_var.set(values[0])
-        self.quality_select.set_enabled(self._info is not None and bool(
-            self._info.audio_options if audio else self._info.qualities
-        ))
         # 视频与仅音频是两个独立的下载方式，各自恢复上次选择的目录。
         saved_dir = self.app.default_save_dir(self._save_dir_key())
         if self.dir_var.get() != saved_dir:
             self.dir_var.set(saved_dir)
+        self._refresh_option_visibility()
+
+    def _audio_format(self) -> str:
+        value = (self.format_var.get() or "").strip().lower()
+        return value if value in core.AUDIO_FORMATS else core.DEFAULT_AUDIO_FORMAT
+
+    def _refresh_option_visibility(self):
+        """按「视频/仅音频」「是否 YouTube」「是否无损格式」决定控件可见与可用。
+
+        无损（flac）没有比特率概念：此时禁用下拉框并把标签改成「无损」，
+        避免用户以为选了个实际不生效的比特率。
+        """
+        audio = self.mode_var.get() == "audio"
+        lossless = self._audio_format() in core.LOSSLESS_AUDIO_FORMATS
+        has_audio = bool(self._info and self._info.audio_options)
+        has_qualities = bool(self._info and self._info.qualities)
+
+        for widget in (self.format_label, self.format_select):
+            if audio and not widget.winfo_manager():
+                widget.pack(side="left", padx=(22, 8) if widget is self.format_label else 0)
+            elif not audio:
+                widget.pack_forget()
+
+        show_subs = (not audio) and self.platform == "YouTube"
+        if show_subs and not self.subtitle_check.winfo_manager():
+            self.subtitle_check.pack(side="left", padx=(22, 0))
+        elif not show_subs:
+            self.subtitle_check.pack_forget()
+
+        # 第二行没有内容时不占位，避免非 YouTube 视频页多出一条空白
+        if audio or show_subs:
+            if not self.opt_row2.winfo_manager():
+                self.opt_row2.pack(fill="x", pady=(10, 0))
+        else:
+            self.opt_row2.pack_forget()
+
+        if audio and lossless:
+            # 无损格式没有比特率概念：与其灰着显示一个无效档位，
+            # 不如直接隐藏，只留「格式」下拉，避免误导。
+            self.quality_label.pack_forget()
+            self.quality_select.pack_forget()
+        else:
+            # 重新显示时按原顺序追加到模式切换之后
+            for widget in (self.quality_label, self.quality_select):
+                if not widget.winfo_manager():
+                    widget.pack(side="left",
+                                padx=(22, 8) if widget is self.quality_label else 0)
+            if audio:
+                self.quality_label.configure(text=i18n.tr("bitrate"))
+                self.quality_select.set_enabled(has_audio)
+            else:
+                self.quality_label.configure(text=i18n.tr("quality"))
+                self.quality_select.set_enabled(has_qualities)
+
+    def _on_audio_format_change(self):
+        self.app.settings["audio_format"] = self._audio_format()
+        settings.save(self.app.settings)
+        self._refresh_option_visibility()
+
+    def _on_subtitle_toggle(self):
+        self.app.settings["subtitles_enabled"] = bool(self.subtitle_var.get())
+        settings.save(self.app.settings)
+
+    # ---------- 视频封面 ----------
+
+    def _load_video_thumbnail(self, info):
+        """后台拉取视频封面；用代数防止旧结果落到新视频上。"""
+        self._thumb_epoch += 1
+        epoch = self._thumb_epoch
+        url = getattr(info, "thumbnail", "") or ""
+        if not url:
+            self._set_thumb_image(epoch, None)
+            return
+
+        def work():
+            try:
+                raw = images.fetch_image_bytes(url)
+            except Exception:
+                raw = None
+            self.after(0, self._set_thumb_image, epoch, raw)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _set_thumb_image(self, epoch, raw):
+        if epoch != self._thumb_epoch:
+            return
+        if not raw:
+            self._thumb_photo = None
+            self.thumb_label.configure(image="")
+            return
+        try:
+            from PIL import Image, ImageTk
+
+            im = Image.open(io.BytesIO(raw))
+            im.thumbnail((self.THUMB_W, self.THUMB_H))
+            photo = ImageTk.PhotoImage(im)
+        except Exception:
+            return
+        self._thumb_photo = photo  # 持引用，避免被 GC 回收后显示空白
+        self.thumb_label.configure(image=photo)
+
+    def _clear_video_thumbnail(self):
+        self._thumb_epoch += 1
+        self._thumb_photo = None
+        self.thumb_label.configure(image="")
 
     def _save_dir_key(self):
         if self.platform == "微博":

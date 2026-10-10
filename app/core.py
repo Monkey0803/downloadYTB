@@ -22,6 +22,14 @@ from .ffmpeg_util import ffmpeg_location_for_ytdlp
 
 DEFAULT_SAVE_DIR = os.path.expanduser("~/Downloads")
 
+# 仅音频模式可选的目标格式；flac 为无损，比特率对它无意义。
+AUDIO_FORMATS = ("mp3", "m4a", "opus", "flac")
+LOSSLESS_AUDIO_FORMATS = ("flac",)
+DEFAULT_AUDIO_FORMAT = "mp3"
+
+# 字幕默认语言：留空时用这几项，避免 "all" 拉下上百种自动字幕。
+DEFAULT_SUBTITLE_LANGS = ("zh-Hans", "zh-Hant", "en")
+
 
 def set_browser_cookies(browser: str):
     """设置 yt-dlp 从哪个浏览器读取 Cookie（空字符串为禁用）。"""
@@ -592,6 +600,21 @@ def download_video(
         seen_files=seen_files, pause_event=pause_event)
 
 
+def _audio_postprocessor(audio_format: str, bitrate_kbps: int) -> dict:
+    """构造 FFmpegExtractAudio 后处理器。
+
+    flac 是无损容器，传 preferredquality 没有意义（ffmpeg 会忽略甚至报错），
+    因此只在有损格式上设置比特率。
+    """
+    codec = (audio_format or DEFAULT_AUDIO_FORMAT).strip().lower()
+    if codec not in AUDIO_FORMATS:
+        codec = DEFAULT_AUDIO_FORMAT
+    config = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
+    if codec not in LOSSLESS_AUDIO_FORMATS:
+        config["preferredquality"] = str(bitrate_kbps)
+    return config
+
+
 def download_audio(
     url: str,
     save_dir: str = DEFAULT_SAVE_DIR,
@@ -600,8 +623,9 @@ def download_audio(
     pause_event: Optional[threading.Event] = None,
     bitrate_kbps: int = 192,
     format_id: Optional[str] = None,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
 ) -> str:
-    """仅下载音频并转为 mp3，返回文件路径。"""
+    """仅下载音频并按 ``audio_format`` 转码，返回文件路径。"""
     os.makedirs(save_dir, exist_ok=True)
     seen_files: set = set()
     opts = _base_opts(platform=platforms.detect(url))
@@ -615,11 +639,7 @@ def download_audio(
                 _make_progress_hook(progress, cancel_event, seen_files, pause_event)
             ],
             "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": str(bitrate_kbps),
-                }
+                _audio_postprocessor(audio_format, bitrate_kbps)
             ],
         }
     )
