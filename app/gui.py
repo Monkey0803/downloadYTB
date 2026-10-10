@@ -275,6 +275,8 @@ class VideoPanel(TFrame):
 
     def _set_status(self, text, error=False, ok=False, filename=None):
         self._status_full = (text, filename)
+        if error:
+            diagnostics.record_error(text)  # 供「复制诊断信息」引用
         self.status_label.set_fg_role("ERROR" if error else ("OK" if ok else "TEXT_SUB"))
         self._refresh_status_text()
 
@@ -764,6 +766,8 @@ class ImagePanel(TFrame):
 
     def _set_status(self, text, error=False, ok=False):
         self._status_full = text
+        if error:
+            diagnostics.record_error(text)  # 供「复制诊断信息」引用
         self.status_label.set_fg_role("ERROR" if error else ("OK" if ok else "TEXT_SUB"))
         self._refresh_status_text()
 
