@@ -260,7 +260,7 @@ Pushing a version tag such as <code>v1.3.0</code> starts <code>.github/workflows
 ## Contribution workflow
 
 1. Fork the repository or create a feature branch from main.
-2. Keep one commit focused on one topic. Use clear imperative English commit messages such as Fix image download cancellation.
+2. Keep one commit focused on one topic. A global commit-msg hook validates every commit message: the subject must be `<type>(<scope>): <description>` (type is feat / fix / refactor / chore / docs / test / perf / build / ci / revert, and application changes in this repository use the scope `pc`), both the subject and the body must contain Chinese, line 2 must be empty, and the body needs at least two lines that each start with `- `.
 3. Run static checks and the feature-specific GUI/live tests.
 4. In a pull request, describe the problem, implementation, verification commands, unverified items, and platform differences.
 5. Do not commit .venv, dist, build/work, screenshots, test_downloads, cookies, account information, or local settings.
@@ -272,7 +272,12 @@ git switch -c fix/short-description
 git diff --check
 PYTHONPYCACHEPREFIX=/tmp/downloadytb-pycache .venv/bin/python -m py_compile app/*.py main.py
 git status --short
-git commit -m "Fix short description"
+git commit -F - <<'MSG'
+fix(pc): 取消图片下载时清理残留的临时文件
+
+- 取消后删除 .part 等临时文件并保留已完成的文件
+- 补充取消流程的回归测试
+MSG
 ~~~
 
 Before committing, confirm that generated files and personal information are not staged:

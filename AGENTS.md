@@ -48,7 +48,37 @@ Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local c
 
 ## Commits and Pull Requests
 
-Use focused imperative English commit subjects, following the existing `feat:` and `docs:` pattern, for example `fix: preserve audio save directory`. Keep one logical change per commit. Pull requests should describe the problem, implementation, verification commands, unverified platform/network cases, and include screenshots for visible UI changes. Before submitting, inspect `git diff --cached --stat` and `git diff --cached --check`.
+A global `commit-msg` hook (`~/.config/git/hooks/commit-msg`, enabled through
+`core.hooksPath`) validates every commit message and rejects the commit outright when it
+does not match. It applies to this repository too, so commit messages must follow the
+format it enforces:
+
+- **Subject**: `<type>(<scope>): <description>`, where `<type>` is one of
+  `feat|fix|refactor|chore|docs|test|perf|build|ci|revert` and `<scope>` matches
+  `[a-z0-9._-]+`. Use the scope `pc` for application changes here (the existing
+  `fix(pc):` commits follow this). A subject without a scope is rejected.
+- **The subject must contain Chinese.** English-only subjects are rejected, so the
+  English-only examples in older revisions of this file no longer apply.
+- **Line 2 must be empty**, followed by the body.
+- **Body**: at least two lines; every non-empty line must start with `- `, the body must
+  contain Chinese, and it must be at least 20 characters long.
+- Merge commits keep Git's generated message and are exempt.
+
+A message that passes the hook:
+
+~~~text
+fix(pc): 修复浏览器 Cookie 不可读时微博图片解析整体失败
+
+- 新增 browser_cookies 模块统一持有 Cookie 配置并识别读取失败
+- 打包 App 未获完全磁盘访问权限时降级为匿名解析而非直接报错
+- Cookie 读取失败输出可操作的权限指引，替代 yt-dlp 的原始消息
+~~~
+
+Always pass an explicit message with `-m`/`-F`. Running a bare `git commit` lets the
+companion `prepare-commit-msg` hook synthesize a generic skeleton, which is compliant but
+says nothing useful about the change.
+
+Keep one logical change per commit. Pull requests should describe the problem, implementation, verification commands, unverified platform/network cases, and include screenshots for visible UI changes. Before submitting, inspect `git diff --cached --stat` and `git diff --cached --check`.
 
 ## Security and Configuration
 
