@@ -119,7 +119,8 @@ class VideoInfo:
     playlist_title: str = ""
     playlist_count: int = 0
     playlist_truncated: bool = False   # 条目数被 PLAYLIST_PREVIEW_LIMIT 截断
-    playlist_entries: List[str] = field(default_factory=list)  # 前几个条目标题
+    playlist_entries: List[str] = field(default_factory=list)  # 探测到的条目标题
+    # （最多 PLAYLIST_PREVIEW_LIMIT 个，供批量选择界面使用）
 
     @property
     def heights(self) -> List[int]:

@@ -126,6 +126,129 @@ def download_dir_key(platform: str, kind: str) -> str:
 # ====================================================================
 
 
+class EntryPicker(tk.Toplevel):
+    """播放列表条目批量选择弹窗（#2）。
+
+    探针只会拿到前 PLAYLIST_PREVIEW_LIMIT 条，所以这里列表的长度就是可选上限，
+    弹窗本身不再发起任何网络请求。
+
+    刻意把「构建」「取值」「确认」拆开，show() 之外都能在单测里直接调用，
+    否则模态对话框（wait_window）会把测试挂住。
+    """
+
+    WIDTH = 620
+    HEIGHT = 540
+    ROW_PADY = 2
+
+    def __init__(self, master, app, titles, selected=None):
+        super().__init__(master)
+        self.app = app
+        self._titles = list(titles)
+        self._pills = []
+        self.result = None
+        chosen = {int(i) for i in (selected or []) if str(i).strip().isdigit()}
+
+        self.title(i18n.tr("pick_entries_title"))
+        self.configure(bg=theme.C().BG)
+        self.transient(master.winfo_toplevel())
+        self.resizable(False, False)
+
+        outer = TFrame(self, bg_role="BG")
+        outer.pack(fill="both", expand=True, padx=14, pady=12)
+        TLabel(outer, text=i18n.tr("pick_entries_title"), font=app.f_section,
+               bg_role="BG").pack(anchor="w")
+        _pack_wrapped_hint(outer, app, i18n.tr("pick_entries_hint", n=len(self._titles)),
+                           bg_role="BG", pady=(6, 8))
+
+        holder = TFrame(outer, bg_role="BG")
+        holder.pack(fill="both", expand=True)
+        self._canvas = tk.Canvas(holder, bg=theme.C().BG, highlightthickness=0, bd=0)
+        bar = tk.Scrollbar(holder, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=bar.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        body = TFrame(self._canvas, bg_role="BG")
+        window = self._canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>",
+                  lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind("<Configure>",
+                          lambda e: self._canvas.itemconfigure(window, width=e.width))
+
+        width = core._playlist_index_width(len(self._titles))
+        for index, text in enumerate(self._titles, start=1):
+            # 序号 + 标题；标题按可用宽度截断（ellipsize 需要字体与像素宽度）
+            label = f"{index:0{width}d} · " + ellipsize(
+                text, app.f_btn, self.WIDTH - 150)
+            pill = CheckPill(body, label, tk.BooleanVar(value=index in chosen),
+                             font=app.f_btn, bg_role="BG",
+                             width=_check_pill_width(app.f_btn, label))
+            pill.pack(anchor="w", pady=self.ROW_PADY)
+            self._pills.append(pill)
+
+        for widget in (self._canvas, body, *self._pills):
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(sequence, self._on_wheel, add="+")
+
+        buttons = TFrame(outer, bg_role="BG")
+        buttons.pack(fill="x", pady=(10, 0))
+        PillButton(buttons, i18n.tr("select_all"), command=lambda: self._select_all(True),
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="left")
+        PillButton(buttons, i18n.tr("pick_none"), command=lambda: self._select_all(False),
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="left", padx=(8, 0))
+        PillButton(buttons, i18n.tr("confirm"), command=self._confirm, primary=True,
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="right")
+        PillButton(buttons, i18n.tr("cancel"), command=self._cancel,
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="right", padx=(0, 8))
+
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self._center_on(master)
+
+    # ---------- 内部 ----------
+    def _center_on(self, master):
+        try:
+            self.update_idletasks()
+            x = master.winfo_rootx() + max(0, (master.winfo_width() - self.WIDTH) // 2)
+            y = master.winfo_rooty() + 60
+            self.geometry(f"{self.WIDTH}x{self.HEIGHT}+{max(0, x)}+{max(0, y)}")
+        except tk.TclError:
+            pass
+
+    def _on_wheel(self, event):
+        delta = getattr(event, "delta", 0) or 0
+        self._canvas.yview_scroll(-1 if delta > 0 else 1, "units")
+        return "break"
+
+    def _select_all(self, value):
+        for pill in self._pills:
+            pill.set_checked(value)
+
+    def _collect(self):
+        """当前勾选的条目下标（1 基，升序）。"""
+        return [index for index, pill in enumerate(self._pills, start=1)
+                if bool(pill._var.get())]
+
+    def _confirm(self):
+        self.result = self._collect()
+        self._close()
+
+    def _cancel(self):
+        self.result = None
+        self._close()
+
+    def _close(self):
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
+        self.destroy()
+
+    def show(self):
+        """模态显示，返回选中的条目下标；取消返回 None。"""
+        self.grab_set()
+        self.wait_window(self)
+        return self.result
+
+
 class VideoPanel(TFrame):
     """单平台的视频下载面板：解析 → 清晰度 → 下载（暂停/继续/取消）。"""
 
@@ -265,6 +388,10 @@ class VideoPanel(TFrame):
             self.opt_row2, self.playlist_limit_var,
             values=[self._playlist_limit_label(v) for v in core.PLAYLIST_LIMITS],
             font=f.f_btn, width=150)
+        self._playlist_items = []      # 批量选择的下标；非空时优先于「下载范围」
+        self.pick_btn = PillButton(self.opt_row2, i18n.tr("pick_entries"),
+                                   command=self._open_entry_picker, font=f.f_btn,
+                                   width=120, bg_role="CARD")
         self._refresh_option_visibility()
 
         # —— 卡片 3：保存位置 ——
@@ -385,6 +512,15 @@ class VideoPanel(TFrame):
                 widget.pack(side="left", padx=(22, 8) if widget is self.range_label else 0)
             elif not show_range:
                 widget.pack_forget()
+
+        # 条目选择只对播放列表有意义；有勾选时把范围下拉置灰以示其被忽略
+        if show_range:
+            self._update_pick_button()
+            if not self.pick_btn.winfo_manager():
+                self.pick_btn.pack(side="left", padx=(16, 0))
+            self.range_select.set_enabled(not self._playlist_items)
+        else:
+            self.pick_btn.pack_forget()
 
         # 第二行没有内容时不占位，避免非 YouTube 视频页多出一条空白
         if audio or show_subs or show_range:
@@ -634,6 +770,7 @@ class VideoPanel(TFrame):
             self.quality_var.set(i18n.tr("probe_first"))
             self.title_label.configure(text="")
             self._clear_video_thumbnail()
+            self._playlist_items = []
             self._set_status(i18n.tr("url_changed"))
 
     def _on_download_btn(self):
@@ -719,14 +856,52 @@ class VideoPanel(TFrame):
         self._start_download(resume=False)
 
     def _playlist_total(self):
-        """整批进度需要的总数：限量时就是限量值，否则用解析到的条目数。"""
+        """整批进度需要的总数：批量选择时是选择数，限量时是限量值。"""
         if not self._info or not self._info.playlist_count:
             return 0
+        if self._playlist_items:
+            return len(self._playlist_items)
         limit = self._playlist_limit()
         if limit > 0:
             return limit
         # 「全部」但解析被限量截断时总数未知，交给界面退化成「第 i 个」
         return 0 if self._info.playlist_truncated else self._info.playlist_count
+
+    def _update_pick_button(self):
+        count = len(self._playlist_items)
+        self.pick_btn.set_text(i18n.tr("pick_entries_selected", n=count)
+                               if count else i18n.tr("pick_entries"))
+
+    def _open_entry_picker(self):
+        """打开条目选择弹窗；确定后记录勾选（空选择表示回到「下载范围」）。"""
+        if not self._info or not self._info.playlist_count:
+            return
+        picker = EntryPicker(self, self.app, self._info.playlist_entries,
+                             self._playlist_items)
+        chosen = picker.show()
+        if chosen is None:
+            return
+        self._playlist_items = chosen
+        self._refresh_option_visibility()
+        if chosen:
+            self._set_status(i18n.tr("pick_entries_selected", n=len(chosen)))
+        else:
+            self._set_status(i18n.tr("probe_success_video")
+                             if not self._info.warning else self._info.warning,
+                             ok=not self._info.warning)
+
+    def _playlist_size_hint(self):
+        """仅用于决定文件名序号补零宽度。
+
+        - 勾选了条目：用最大下标（可能勾到第 100 条，宽度得够）；
+        - 否则限量时用限量值，全量时用解析到的条目数。
+        """
+        if not self._info or not self._info.playlist_count:
+            return 0
+        if self._playlist_items:
+            return max(self._playlist_items)
+        limit = self._playlist_limit()
+        return limit if limit > 0 else self._info.playlist_count
 
     def _probe_then_download(self, url):
         """「开始下载」时尚未解析：自动解析，成功后立即接着下载。"""
@@ -824,12 +999,15 @@ class VideoPanel(TFrame):
                                                bitrate_kbps=p["audio_bitrate"],
                                                format_id=p["audio_format_id"],
                                                audio_format=p["audio_format"])
-                elif p["is_playlist"] and p["playlist_limit"] != 1:
+                elif p["is_playlist"] and (p["playlist_items"]
+                                           or p["playlist_limit"] != 1):
                     paths = core.download_playlist(
                         p["url"], height=p["height"], save_dir=p["save_dir"],
                         playlist_limit=p["playlist_limit"],
                         playlist_title=p["playlist_title"],
                         playlist_total=p["playlist_total"],
+                        playlist_size_hint=p["playlist_size_hint"],
+                        playlist_items=p["playlist_items"],
                         progress=on_progress, entry_progress=on_entry,
                         cancel_event=cancel_event, pause_event=pause_event,
                         subtitles=p["subtitles"], subtitle_langs=p["subtitle_langs"])

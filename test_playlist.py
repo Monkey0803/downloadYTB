@@ -232,6 +232,89 @@ class ProgressHookTests(unittest.TestCase):
         self.assertEqual(seen, [(3, 0, "C")])
 
 
+class PlaylistItemSelectionTests(unittest.TestCase):
+    """批量选择（#2）：core 侧的下标清洗与参数构造。"""
+
+    def test_clean_items_dedupes_sorts_and_drops_invalid(self):
+        self.assertEqual(core._clean_playlist_items([3, 1, 1, "2", "x", 0, -5, None]),
+                         [1, 2, 3])
+        self.assertEqual(core._clean_playlist_items([]), [])
+        self.assertEqual(core._clean_playlist_items(None), [])
+
+    def _capture(self, **kwargs):
+        captured = {}
+
+        def fake_run(url, opts, **extra):
+            captured.update(opts)
+            return ""
+
+        with tempfile.TemporaryDirectory() as out, mock.patch.object(
+            core, "_run_download_with_cookie_fallback", fake_run
+        ), mock.patch.object(core, "_paths_from_info", lambda info: ["/tmp/x.mp4"]):
+            core.download_playlist(PLAYLIST_URL, save_dir=out,
+                                   playlist_title="L", **kwargs)
+        return captured
+
+    def test_selection_sets_playlist_items(self):
+        captured = self._capture(playlist_items=[5, 2, 2])
+        self.assertEqual(captured["playlist_items"], "2,5")
+
+    def test_selection_overrides_limit(self):
+        captured = self._capture(playlist_items=[7], playlist_limit=50)
+        self.assertEqual(captured["playlist_items"], "7")
+        self.assertNotIn("playlistend", captured)
+
+    def test_no_selection_keeps_limit_behaviour(self):
+        captured = self._capture(playlist_items=[], playlist_limit=10)
+        self.assertNotIn("playlist_items", captured)
+        self.assertEqual(captured["playlistend"], 10)
+
+
+class PlaylistNamingTests(unittest.TestCase):
+    """文件名按「序号 - 标题」命名（#3）。"""
+
+    def test_index_width_follows_size_hint(self):
+        self.assertEqual(core._playlist_index_width(0), 2)
+        self.assertEqual(core._playlist_index_width(None), 2)
+        self.assertEqual(core._playlist_index_width(5), 2)
+        self.assertEqual(core._playlist_index_width(25), 2)
+        self.assertEqual(core._playlist_index_width(100), 3)
+        self.assertEqual(core._playlist_index_width(5309), 4)
+        self.assertEqual(core._playlist_index_width("bad"), 2)
+
+    def test_template_renders_index_title_and_id(self):
+        import yt_dlp
+        tmpl = core._playlist_outtmpl("/tmp/x", 100)
+        ydl = yt_dlp.YoutubeDL({"outtmpl": tmpl, "quiet": True})
+        name = ydl.prepare_filename(
+            {"title": "TED Talk", "id": "abc", "ext": "mp4", "playlist_index": 7})
+        self.assertEqual(name.split("/")[-1], "007 - TED Talk [abc].mp4")
+
+    def test_missing_index_does_not_become_na(self):
+        """不加 |0 兜底时 yt-dlp 会填 "NA"，文件名会很难看。"""
+        import yt_dlp
+        tmpl = core._playlist_outtmpl("/tmp/x", 25)
+        ydl = yt_dlp.YoutubeDL({"outtmpl": tmpl, "quiet": True})
+        name = ydl.prepare_filename({"title": "T", "id": "i", "ext": "mp4"})
+        self.assertTrue(name.split("/")[-1].startswith("0 - "), name)
+
+    def test_outtmpl_used_by_download_playlist(self):
+        captured = {}
+
+        def fake_run(url, opts, **extra):
+            captured.update(opts)
+            return ""
+
+        with tempfile.TemporaryDirectory() as out, mock.patch.object(
+            core, "_run_download_with_cookie_fallback", fake_run
+        ), mock.patch.object(core, "_paths_from_info", lambda info: ["/tmp/x.mp4"]):
+            core.download_playlist(PLAYLIST_URL, save_dir=out, playlist_title="L",
+                                   playlist_size_hint=42)
+        self.assertIn("%(playlist_index", captured["outtmpl"])
+        self.assertIn(" - %(title)", captured["outtmpl"])
+        self.assertIn("02d", captured["outtmpl"])      # 42 -> 两位
+
+
 class PathsAndNamingTests(unittest.TestCase):
     def test_playlist_paths_follow_entry_order(self):
         with tempfile.TemporaryDirectory() as out:

@@ -7,7 +7,7 @@ macOS menubar 都替换掉，既隔离结果，也不会污染用户自己的 se
 import io
 import unittest
 
-from app import core, gui, settings as settings_mod
+from app import core, gui, i18n, settings as settings_mod
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -241,12 +241,175 @@ class PlaylistUiTests(unittest.TestCase):
         self.app.update_idletasks()
         self.assertEqual(self.panel._playlist_total(), 3)
 
+    def test_title_is_recomputed_on_resize(self):
+        """解析可能早于布局完成（那时宽度还很小），窗口缩放也会改变可用宽度。
+
+        所以标题必须挂 <Configure> 重算；否则截断结果会一直停留在
+        「播放列表：TED - Videos · …」，把条目数整段丢掉。
+        """
+        self.panel._probe_done(self._playlist_info())
+        self.app.update_idletasks()
+        # 把文字改坏，再触发一次尺寸变化事件，模拟「宽度变了需要重算」
+        self.panel.title_label.configure(text="坏掉的文字")
+        self.panel.title_label.event_generate("<Configure>")
+        self.app.update_idletasks()
+        self.assertIn("至少 100", self.panel.title_label.cget("text"))
+
+    def test_refresh_title_without_info_is_safe(self):
+        self.panel._info = None
+        self.panel._refresh_title()      # 不应抛错
+
+    def test_pick_button_visibility(self):
+        self.panel._probe_done(self._playlist_info())
+        self.app.update_idletasks()
+        self.assertTrue(self.panel.pick_btn.winfo_manager())
+        self.panel._probe_done(core.VideoInfo(url="u", title="单视频", duration=10,
+                                              uploader="", qualities=[],
+                                              audio_options=[], thumbnail=""))
+        self.app.update_idletasks()
+        self.assertFalse(self.panel.pick_btn.winfo_manager())
+
+    def test_pick_button_text_reflects_selection(self):
+        self.panel._probe_done(self._playlist_info())
+        self.assertEqual(self.panel.pick_btn._text, i18n.tr("pick_entries"))
+        self.panel._playlist_items = [2, 5, 9]
+        self.panel._refresh_option_visibility()
+        self.app.update_idletasks()
+        self.assertEqual(self.panel.pick_btn._text, i18n.tr("pick_entries_selected", n=3))
+
+    def test_range_is_disabled_while_a_selection_exists(self):
+        self.panel._probe_done(self._playlist_info())
+        self.panel._playlist_items = [4]
+        self.panel._refresh_option_visibility()
+        self.app.update_idletasks()
+        self.assertFalse(self.panel.range_select._enabled)
+        self.panel._playlist_items = []
+        self.panel._refresh_option_visibility()
+        self.app.update_idletasks()
+        self.assertTrue(self.panel.range_select._enabled)
+
+    def test_total_follows_selection(self):
+        self.panel._probe_done(self._playlist_info())
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(50))
+        self.panel._playlist_items = [1, 2, 3]
+        self.assertEqual(self.panel._playlist_total(), 3)
+
+    def test_size_hint_follows_selection(self):
+        """补零宽度要覆盖最大勾选下标，而不是「下载范围」的值。"""
+        self.panel._probe_done(self._playlist_info())
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(1))
+        self.panel._playlist_items = [7, 100]
+        self.assertEqual(self.panel._playlist_size_hint(), 100)
+        self.panel._playlist_items = []
+        self.assertEqual(self.panel._playlist_size_hint(), 1)      # 跟随「仅当前视频」
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(25))
+        self.assertEqual(self.panel._playlist_size_hint(), 25)
+
+    def test_selection_is_cleared_on_new_probe(self):
+        self.panel._probe_done(self._playlist_info())
+        self.panel._playlist_items = [1, 2]
+        self.panel._probe_done(self._playlist_info())
+        self.assertEqual(self.panel._playlist_items, [])
+
+    def test_download_params_carry_selection(self):
+        self.panel._probe_done(self._playlist_info())
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(25))
+        self.panel._playlist_items = [3, 9]
+        self.panel.url_var.set(self.panel._info.url)
+        captured = {}
+        original = gui.VideoPanel._start_download
+        gui.VideoPanel._start_download = lambda self, resume: captured.update(self._dl_params)
+        try:
+            self.panel.on_download()
+        finally:
+            gui.VideoPanel._start_download = original
+        self.assertEqual(captured["playlist_items"], [3, 9])
+        self.assertEqual(captured["playlist_total"], 2)
+        self.assertTrue(captured["is_playlist"])
+        # 有勾选时补零宽度按最大勾选下标（9）而不是「下载范围」的 25
+        self.assertEqual(captured["playlist_size_hint"], 9)
+
     def test_range_choice_is_persisted(self):
         self.panel._probe_done(self._playlist_info())
         self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(25))
         self.app.update_idletasks()
         self.assertEqual(self.saved.get("playlist_limit"), 25)
         self.assertEqual(self.panel._playlist_limit(), 25)
+
+
+class EntryPickerTests(unittest.TestCase):
+    """条目批量选择弹窗（#2）。刻意不调用 show()，否则模态会挂住测试。
+
+    整个类共享一个 Tk 根窗口：每个用例都建一次 App 太慢，而且反复销毁根窗口
+    时残留的 Toplevel 会让 Tk 直接段错误（真实踩过）。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        settings_mod.load = lambda: _fake_load()
+        settings_mod.save = lambda data: None
+        gui.menubar.create = lambda *a, **kw: None
+        cls.app = gui.App()
+        cls.titles = ["第一集", "第二集", "第三集", "第四集"]
+
+    @classmethod
+    def tearDownClass(cls):
+        settings_mod.load = _ORIGINAL_LOAD
+        settings_mod.save = _ORIGINAL_SAVE
+        gui.menubar.create = _ORIGINAL_MENUBAR
+        cls.app.destroy()
+
+    def setUp(self):
+        self._pickers = []
+
+    def tearDown(self):
+        # 用例内不手动销毁，统一在这里收尾，避免重复 destroy 导致崩溃
+        for picker in self._pickers:
+            try:
+                if picker.winfo_exists():
+                    picker.destroy()
+            except Exception:
+                pass
+
+    def _picker(self, selected=None):
+        picker = gui.EntryPicker(self.app, self.app, self.titles, selected)
+        self._pickers.append(picker)
+        return picker
+
+    def test_preselection_round_trip(self):
+        self.assertEqual(self._picker([2, 4])._collect(), [2, 4])
+
+    def test_no_preselection_means_nothing_checked(self):
+        self.assertEqual(self._picker()._collect(), [])
+
+    def test_select_all_and_none(self):
+        picker = self._picker()
+        picker._select_all(True)
+        self.assertEqual(picker._collect(), [1, 2, 3, 4])
+        picker._select_all(False)
+        self.assertEqual(picker._collect(), [])
+
+    def test_confirm_sets_result(self):
+        picker = self._picker([1])
+        picker._confirm()
+        self.assertEqual(picker.result, [1])
+
+    def test_cancel_returns_none(self):
+        picker = self._picker([1, 2])
+        picker._cancel()
+        self.assertIsNone(picker.result)
+
+    def test_row_count_matches_probed_entries(self):
+        self.assertEqual(len(self._picker()._pills), len(self.titles))
+
+    def test_labels_carry_zero_padded_index(self):
+        picker = self._picker()
+        self.assertTrue(picker._pills[0]._text.startswith("01 · "), picker._pills[0]._text)
+
+    def test_cancel_then_destroy_is_safe(self):
+        picker = self._picker()
+        picker._cancel()
+        picker.destroy()          # 第二次销毁不应抛错
 
 if __name__ == "__main__":
     unittest.main()

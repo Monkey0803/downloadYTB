@@ -432,6 +432,15 @@ class CheckPill(tk.Canvas):
         self.create_text(b + 9, h / 2, text=self._text, fill=c.TEXT,
                          font=self._font, anchor="w")
 
+    def set_checked(self, value):
+        """程序化勾选/取消。
+
+        直接改 StringVar/BooleanVar 不会触发重绘（_draw 只挂在点击与
+        <Configure> 上），所以「全选」这类批量操作必须走这里。
+        """
+        self._var.set(bool(value))
+        self._draw()
+
     def _toggle(self, e):
         self._var.set(not self._var.get())
         self._draw()

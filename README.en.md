@@ -29,7 +29,8 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - A video thumbnail preview appears after probing, so you can confirm the video before downloading.
 - Re-downloading the same image post skips existing files instead of creating numbered copies (can be turned off in Settings).
 - Playlist and channel links are supported: after probing you are told "this is a playlist with N items" and can pick the current video only, the first 10/25/50, or all of them (the default is the current video only, so a whole channel is never downloaded by accident).
-- Taskbar progress: a Dock badge on macOS, and a real taskbar progress bar on Windows that flashes the window on completion (Linux only on some desktops).
+- Any items in a probed playlist can be ticked for batch download (within the first 100 listed), and files are named "index - title" so they sort correctly.
+- Taskbar progress: a Dock badge on macOS, a real taskbar progress bar on Windows that flashes the window on completion; KDE uses JobView and Unity / Ubuntu Dock use LauncherEntry (native GNOME shows nothing).
 - ffmpeg is supplied through imageio-ffmpeg; a separate ffmpeg installation is normally unnecessary.
 
 ## Supported platforms
