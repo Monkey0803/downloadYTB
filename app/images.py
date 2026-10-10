@@ -651,13 +651,16 @@ def probe_images(url: str) -> ImagePost:
     return ImagePost(url=url, title=title[:120], author=author, items=items)
 
 
-def fetch_thumbnail(item: ImageItem, max_bytes: int = 8 * 1024 * 1024,
-                    retries: int = 2) -> bytes:
-    """下载单张缩略图字节（在工作线程调用，界面层再转 PhotoImage）。"""
+def fetch_image_bytes(url: str, max_bytes: int = 8 * 1024 * 1024,
+                      retries: int = 2) -> bytes:
+    """下载任意图片字节（缩略图 / 视频封面），在工作线程调用。
+
+    界面层再转成 PhotoImage；带重试以容忍网络抖动。
+    """
     last_exc = None
     for _ in range(retries + 1):
         try:
-            r = requests.get(item.thumb_url, headers=_media_headers(item.thumb_url), timeout=10)
+            r = requests.get(url, headers=_media_headers(url), timeout=10)
             r.raise_for_status()
             if len(r.content) > max_bytes:
                 raise ImageError(i18n.tr("error_thumbnail_large"))
@@ -665,6 +668,22 @@ def fetch_thumbnail(item: ImageItem, max_bytes: int = 8 * 1024 * 1024,
         except requests.RequestException as exc:
             last_exc = exc
     raise last_exc
+
+
+def fetch_thumbnail(item: ImageItem, max_bytes: int = 8 * 1024 * 1024,
+                    retries: int = 2) -> bytes:
+    """下载单张缩略图字节（在工作线程调用，界面层再转 PhotoImage）。"""
+    return fetch_image_bytes(item.thumb_url, max_bytes=max_bytes, retries=retries)
+
+
+def _primary_path(save_dir: str, stem: str, ext: str) -> str:
+    """该图片「本来应该」保存到的路径（不做重名规避）。
+
+    用于判断是否已经下载过：微博/图集的文件名由帖子 ID + 序号决定，
+    同一帖子重复解析会得到相同的文件名，因此可以据此识别重复。
+    """
+    stem = re.sub(r'[\\/:*?"<>|]+', "_", stem)[:120] or "image"
+    return os.path.join(save_dir, f"{stem}.{ext}")
 
 
 def _unique_path(save_dir: str, stem: str, ext: str) -> str:

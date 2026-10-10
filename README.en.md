@@ -24,13 +24,17 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - One-click diagnostic copy (versions, OS, cookie status, last error) for pasting into an issue; it contains no personal paths or cookie contents.
 - Cookies can be configured per platform (for example only Instagram), keeping the other platforms anonymous.
 - On macOS the Dock badge shows download progress, turns into ✓ on completion, and the icon bounces once when the app is in the background (can be turned off in Settings).
+- Audio-only downloads can target MP3, M4A, Opus, or FLAC (lossless formats hide the bitrate picker).
+- YouTube downloads can include subtitles (manual and automatic are both attempted, saved as .srt).
+- A video thumbnail preview appears after probing, so you can confirm the video before downloading.
+- Re-downloading the same image post skips existing files instead of creating numbered copies (can be turned off in Settings).
 - ffmpeg is supplied through imageio-ffmpeg; a separate ffmpeg installation is normally unnecessary.
 
 ## Supported platforms
 
 | Platform | Video | Audio only | Images | Notes |
 | --- | --- | --- | --- | --- |
-| YouTube | Yes | Yes | - | Quality and estimated size come from probing |
+| YouTube | Yes | Yes | - | Quality and estimated size come from probing; subtitles optional |
 | X / Twitter | Yes | Yes | Yes | Image downloads use original-image URLs |
 | Instagram | Yes | Yes | Yes | Browser cookies are commonly required |
 | Douyin | Yes | Yes | - | Usually exposes a single audio-video stream |

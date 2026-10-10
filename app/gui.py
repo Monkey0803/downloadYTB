@@ -129,6 +129,10 @@ def download_dir_key(platform: str, kind: str) -> str:
 class VideoPanel(TFrame):
     """单平台的视频下载面板：解析 → 清晰度 → 下载（暂停/继续/取消）。"""
 
+    # 视频封面在标题行左侧预留的固定尺寸（16:9）
+    THUMB_W = 140
+    THUMB_H = 79
+
     def __init__(self, master, app, platform="YouTube", show_audio=True,
                  on_redirect=None):
         super().__init__(master, bg_role="BG")
@@ -160,7 +164,7 @@ class VideoPanel(TFrame):
 
         # —— 卡片 1：链接 ——
         card1 = GlassCard(self)
-        card1.set_height(130)
+        card1.set_height(196)
         card1.pack(fill="x", pady=(0, 12))
         b1 = card1.body
         TLabel(b1, text=i18n.tr(self._url_prompt_key()), font=f.f_section, bg_role="CARD",
@@ -182,13 +186,24 @@ class VideoPanel(TFrame):
                                     font=f.f_btn, width=68, bg_role="CARD")
         self.probe_btn.pack(side="left", padx=(8, 0))
 
-        self.title_label = TLabel(b1, text="", anchor="w", justify="left",
+        # 标题行：左侧预留固定尺寸的封面位（解析成功后在后台载入），右侧标题
+        title_row = TFrame(b1, bg_role="CARD")
+        title_row.pack(fill="x", pady=(8, 0))
+        self.thumb_holder = TFrame(title_row, bg_role="CARD",
+                                   width=self.THUMB_W, height=self.THUMB_H)
+        self.thumb_holder.pack(side="left", padx=(0, 10))
+        self.thumb_holder.pack_propagate(False)  # 固定像素尺寸，不被内容撑开
+        self.thumb_label = TLabel(self.thumb_holder, text="", bg_role="CARD")
+        self.thumb_label.pack(fill="both", expand=True)
+        self._thumb_epoch = 0
+        self._thumb_photo = None  # 必须持引用，否则 PhotoImage 会被回收
+        self.title_label = TLabel(title_row, text="", anchor="w", justify="left",
                                   font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB")
-        self.title_label.pack(anchor="w", fill="x", pady=(8, 0))
+        self.title_label.pack(side="left", fill="x", expand=True)
 
         # —— 卡片 2：下载选项 ——
         card2 = GlassCard(self)
-        card2.set_height(114)
+        card2.set_height(152)
         card2.pack(fill="x", pady=(0, 12))
         b2 = card2.body
         TLabel(b2, text=i18n.tr("download_options"), font=f.f_section, bg_role="CARD",
@@ -516,6 +531,7 @@ class VideoPanel(TFrame):
         self.quality_select.set_values(values)
         self.quality_var.set(values[0])
         self._on_mode_change()
+        self._load_video_thumbnail(info)
         # 浏览器 Cookie 读取失败但匿名解析成功时给出提示。
         self._set_status(info.warning or i18n.tr("probe_success_video"),
                          ok=not info.warning)
@@ -546,6 +562,7 @@ class VideoPanel(TFrame):
             self.quality_select.set_values([])
             self.quality_var.set(i18n.tr("probe_first"))
             self.title_label.configure(text="")
+            self._clear_video_thumbnail()
             self._set_status(i18n.tr("url_changed"))
 
     def _on_download_btn(self):

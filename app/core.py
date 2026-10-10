@@ -107,6 +107,7 @@ class VideoInfo:
     qualities: List[QualityOption] = field(default_factory=list)  # 可用清晰度（降序）
     audio_options: List[AudioOption] = field(default_factory=list)  # 可用音频比特率（降序）
     warning: str = ""  # 非致命的降级提示（如浏览器 Cookie 读取失败后改用匿名解析）
+    thumbnail: str = ""  # 视频封面直链，用于下载前的预览
 
     @property
     def heights(self) -> List[int]:
@@ -442,6 +443,7 @@ def probe(url: str) -> VideoInfo:
         uploader=info.get("uploader") or info.get("channel") or "",
         qualities=qualities,
         audio_options=audio_options,
+        thumbnail=info.get("thumbnail") or "",
         # 解析成功但浏览器 Cookie 被跳过：如实告知，避免用户以为用的是登录态。
         warning=i18n.tr("cookie_fallback_warning") if cookie_error is not None else "",
     )
