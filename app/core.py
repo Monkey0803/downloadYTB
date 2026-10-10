@@ -33,7 +33,6 @@ DEFAULT_SUBTITLE_LANGS = ("zh-Hans", "zh-Hant", "en")
 # 播放列表：解析阶段只做「扁平 + 限量」抽取。实测一个 5300 条的频道，
 # 不限量的扁平抽取要 56 秒、非扁平超过 200 秒仍不返回；限量 100 只要 1.6 秒。
 PLAYLIST_PREVIEW_LIMIT = 100
-PLAYLIST_PREVIEW_TITLES = 8      # 界面上预览几个条目标题
 PLAYLIST_LIMIT_ALL = 0           # 0 = 整个播放列表
 # 界面提供的条数选项（1 表示只下载当前视频，保持历史行为）
 PLAYLIST_LIMITS = (1, 10, 25, 50, PLAYLIST_LIMIT_ALL)
@@ -350,8 +349,7 @@ def probe(url: str) -> VideoInfo:
             raw.get("title") or "",
             len(entries),
             len(entries) >= PLAYLIST_PREVIEW_LIMIT,
-            [(e.get("title") or "").strip()
-             for e in entries[:PLAYLIST_PREVIEW_TITLES]],
+            [(e.get("title") or "").strip() for e in entries],
             entries[0],
         )
         first_url = entries[0].get("url") or entries[0].get("webpage_url") or ""
@@ -784,6 +782,48 @@ def _paths_from_info(info) -> List[str]:
     return out
 
 
+def _clean_playlist_items(items) -> List[int]:
+    """整理界面传来的条目下标：去重、排序、只保留正整数。
+
+    界面的勾选顺序不该影响结果，所以统一排序；非法值一律丢弃而不是报错——
+    这只是个筛选条件，不该让整个下载失败。
+    """
+    if not items:
+        return []
+    cleaned = set()
+    for raw in items:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            cleaned.add(value)
+    return sorted(cleaned)
+
+
+def _playlist_index_width(size_hint) -> int:
+    """序号补零宽度：按已知条目数决定，最少 2 位。
+
+    文件名按字典序排序时，不补零会出现 1, 10, 100, 2 这种顺序。总数未知时
+    退到 2 位（yt-dlp 对超出的位数不会截断，只是不再对齐）。
+    """
+    try:
+        total = int(size_hint or 0)
+    except (TypeError, ValueError):
+        total = 0
+    return max(2, len(str(total))) if total > 0 else 2
+
+
+def _playlist_outtmpl(folder: str, size_hint=None) -> str:
+    """播放列表条目的输出模板：``序号 - 标题 [id].ext``。
+
+    ``%(playlist_index|0)0Nd`` 的 ``|0`` 兜底是为了极少数不提供序号的抽取器：
+    不加兜底 yt-dlp 会填成 "NA"，加了我们最多看到一个 "0"。
+    """
+    width = _playlist_index_width(size_hint)
+    return os.path.join(folder, f"%(playlist_index|0)0{width}d - %(title).120B [%(id)s].%(ext)s")
+
+
 def _safe_dirname(name: str) -> str:
     """把播放列表标题变成安全的目录名。"""
     cleaned = re.sub(r'[\\/:*?"<>|]+', "_", (name or "").strip()).strip(" .")
@@ -803,8 +843,15 @@ def download_playlist(
     subtitles: bool = False,
     subtitle_langs=None,
     playlist_total: Optional[int] = None,
+    playlist_size_hint: Optional[int] = None,
+    playlist_items=None,
 ) -> List[str]:
     """下载播放列表，返回所有产物路径（按列表顺序）。
+
+    playlist_items 给定时只下载这些条目（1 基下标，如 [1, 3, 5]），此时忽略
+    playlist_limit；文件名里的序号仍用条目在播放列表中的原始位置。
+
+    playlist_size_hint 只用于决定文件名的序号补零宽度（总数未知时也没关系）。
 
     playlist_limit 为 0 表示整个播放列表，否则只下载前 N 个（playlistend）。
     整批进度由 progress 回调给出（percent 是整批的百分比），单个条目的位置
@@ -833,16 +880,21 @@ def download_playlist(
     opts.update({
         "noplaylist": False,
         "format": fmt,
-        "outtmpl": os.path.join(save_dir, _safe_dirname(playlist_title),
-                                "%(title).120B [%(id)s].%(ext)s"),
+        "outtmpl": _playlist_outtmpl(
+            os.path.join(save_dir, _safe_dirname(playlist_title)),
+            playlist_size_hint if playlist_size_hint is not None else playlist_total),
         "merge_output_format": "mp4",
         "progress_hooks": [
             _make_progress_hook(progress, cancel_event, seen_files, pause_event,
                                 entry_progress, playlist_total)
         ],
     })
+    selected = _clean_playlist_items(playlist_items)
     limit = int(playlist_limit or 0)
-    if limit > 0:
+    if selected:
+        # 指定条目时用 playlist_items（yt-dlp 接受 "1,3,5-7" 这种写法）
+        opts["playlist_items"] = ",".join(str(i) for i in selected)
+    elif limit > 0:
         opts["playlistend"] = limit
     if subtitles:
         opts.update(subtitle_options(subtitle_langs))

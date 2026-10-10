@@ -200,6 +200,8 @@ class VideoPanel(TFrame):
         self.title_label = TLabel(title_row, text="", anchor="w", justify="left",
                                   font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB")
         self.title_label.pack(side="left", fill="x", expand=True)
+        # 宽度由父容器决定，改文字不会反向改变自身的 Configure，不会死循环
+        self.title_label.bind("<Configure>", lambda e: self._refresh_title())
 
         # —— 卡片 2：下载选项 ——
         card2 = GlassCard(self)
@@ -556,25 +558,37 @@ class VideoPanel(TFrame):
         self.probe_btn.configure_state("normal")
         self.download_btn.configure_state("normal")
 
-        text, suffix = self._title_text(info)
-        max_px = max(200, self.title_label.winfo_width() - 8)
-        f = self.app.f_small
-        title = text
-        while title and f.measure(title + "…" + suffix) > max_px:
-            title = title[:-1]
-        if title != text:
-            title += "…"
-        self.title_label.set_fg_role("TEXT")
-        self.title_label.configure(text=f"{title}{suffix}")
+        self._refresh_title()
 
         values = [q.display for q in info.qualities] if info.qualities else ["最佳画质"]
         self.quality_select.set_values(values)
         self.quality_var.set(values[0])
+        self._playlist_items = []      # 换了链接/重新解析，之前的勾选作废
         self._on_mode_change()
         self._load_video_thumbnail(info)
         # 浏览器 Cookie 读取失败但匿名解析成功时给出提示。
         self._set_status(info.warning or i18n.tr("probe_success_video"),
                          ok=not info.warning)
+
+    def _refresh_title(self):
+        """按当前可用宽度重算标题的截断。
+
+        解析可能发生在布局完成之前（此时 winfo_width() 还很小），窗口缩放也会
+        改变可用宽度，所以不能只在解析成功时算一次——实测会截成
+        「播放列表：TED - Videos · …」，把条目数整个丢掉。
+        """
+        if self._info is None:
+            return
+        text, suffix = self._title_text(self._info)
+        max_px = max(200, self.title_label.winfo_width() - 8)
+        font = self.app.f_small
+        title = text
+        while title and font.measure(title + "…" + suffix) > max_px:
+            title = title[:-1]
+        if title != text:
+            title += "…"
+        self.title_label.set_fg_role("TEXT")
+        self.title_label.configure(text=f"{title}{suffix}")
 
     def _title_text(self, info):
         """标题行文字与后缀。
@@ -695,6 +709,8 @@ class VideoPanel(TFrame):
                                if self._info.playlist_count else 1),
             "playlist_title": self._info.playlist_title if self._info.playlist_count else "",
             "playlist_total": self._playlist_total(),
+            "playlist_size_hint": self._playlist_size_hint(),
+            "playlist_items": list(self._playlist_items),
         }
         self._last_file = None
         self._last_percent = 0.0
