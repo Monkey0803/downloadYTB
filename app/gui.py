@@ -21,8 +21,8 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import (browser_cookies, core, diagnostics, i18n, images, menubar,
-               settings, theme, windowing)
+from . import (browser_cookies, core, diagnostics, dock, i18n, images, menubar,
+               platforms, settings, theme, windowing)
 from .widgets import (
     CheckPill, GlassCard, ImagePicker, LogoSwatch, PillButton, PillSelect,
     RoundEntry, RoundProgress, SegmentedControl, SidebarItem, TFrame, TLabel,
@@ -80,6 +80,10 @@ def asset_path(name: str):
 LOGO_OPTIONS = [("classic", "classic_blue"), ("neon", "neon"),
                 ("sunset", "sunset"), ("mint", "mint")]
 
+# 按平台 Cookie 覆盖的界面行顺序，与 platforms.PLATFORMS 一一对应
+PLATFORM_LABEL_KEYS = ("youtube_nav", "x_nav", "instagram_nav",
+                       "douyin_nav", "bilibili_nav", "weibo_nav")
+
 
 def logo_icon_path(key: str, size: int = 1024):
     """返回某款 logo 处理后图标的绝对路径；缺失时返回 None。"""
@@ -93,21 +97,8 @@ def logo_menubar_path(key: str):
 
 
 def detect_platform(url: str):
-    """根据链接判断平台页 key。"""
-    low = (url or "").lower()
-    if "youtube.com" in low or "youtu.be" in low:
-        return "youtube"
-    if "x.com" in low or "twitter.com" in low:
-        return "x"
-    if "instagram.com" in low:
-        return "instagram"
-    if "douyin.com" in low:
-        return "douyin"
-    if "bilibili.com" in low or "b23.tv" in low:
-        return "bilibili"
-    if "weibo.com" in low or "weibo.cn" in low:
-        return "weibo"
-    return None
+    """根据链接判断平台页 key（映射表在 app/platforms.py，引擎也会用到）。"""
+    return platforms.detect(url)
 
 
 def is_weibo_video_url(url: str):
@@ -1322,8 +1313,58 @@ class SettingsPage(TFrame):
 
         # 说明文字的换行行数随语言/窗口宽度变化，卡片高度按内容实测，
         # 避免英文、日文文案被卡片下沿裁切（固定高度已不够用）。
-        b3.bind("<Configure>", lambda _e: self._fit_cookie_card(), add="+")
-        self.after_idle(self._fit_cookie_card)
+        self._track_card("cookie", card3, b3)
+
+        # —— 按平台覆盖 Cookie ——
+        # 动机：Instagram 需要登录态，而 YouTube / 微博 等不需要；全局开关
+        # 一旦打开就会把所有平台都带上 Cookie（早期版本的微博失败即由此而来）。
+        card_plat = GlassCard(self._scroll_body)
+        card_plat.set_height(340)
+        card_plat.pack(fill="x", pady=(0, 12))
+        bp = card_plat.body
+        TLabel(bp, text=i18n.tr("platform_cookies"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        # 选项：跟随全局 / 不使用 / 具体浏览器
+        self._platform_cookie_options = [
+            (i18n.tr("cookie_follow_global"), ""),
+            (i18n.tr("no_cookie"), browser_cookies.PLATFORM_NONE),
+            ("Chrome", "chrome"), ("Safari", "safari"),
+            ("Firefox", "firefox"), ("Edge", "edge"),
+        ]
+        stored = app.settings.get("platform_cookies")
+        stored = stored if isinstance(stored, dict) else {}
+        self._platform_vars = {}
+        for platform, label_key in zip(platforms.PLATFORMS, PLATFORM_LABEL_KEYS):
+            row = TFrame(bp, bg_role="CARD")
+            row.pack(fill="x", pady=(8, 0))
+            TLabel(row, text=i18n.tr(label_key), font=f.f_body, bg_role="CARD",
+                   width=14, anchor="w").pack(side="left")
+            current = stored.get(platform, "")
+            label = next((l for l, v in self._platform_cookie_options
+                          if v == current), self._platform_cookie_options[0][0])
+            var = tk.StringVar(value=label)
+            var.trace_add("write", lambda *a, p=platform: self._on_platform_cookie_change(p))
+            self._platform_vars[platform] = var
+            PillSelect(row, var, values=[l for l, _ in self._platform_cookie_options],
+                       font=f.f_btn, width=150).pack(side="left", padx=(8, 0))
+        _pack_wrapped_hint(bp, app, i18n.tr("platform_cookies_hint"),
+                           bg_role="CARD", pady=(12, 0))
+        self._track_card("platform", card_plat, bp)
+
+        # —— 下载提示（Dock）——
+        card_dock = GlassCard(self._scroll_body)
+        card_dock.set_height(110)
+        card_dock.pack(fill="x", pady=(0, 12))
+        bdk = card_dock.body
+        TLabel(bdk, text=i18n.tr("download_feedback"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        self.dock_var = tk.BooleanVar(value=bool(app.settings.get("dock_status", True)))
+        self.dock_var.trace_add("write", lambda *a: self._on_dock_status_change())
+        CheckPill(bdk, i18n.tr("dock_status"), self.dock_var,
+                  font=f.f_btn, width=340, bg_role="CARD").pack(anchor="w", pady=(10, 0))
+        _pack_wrapped_hint(bdk, app, i18n.tr("dock_status_hint"),
+                           bg_role="CARD", pady=(8, 0))
+        self._track_card("dock", card_dock, bdk)
 
         # —— 快捷键 ——
         card_keys = GlassCard(self._scroll_body)
@@ -1592,6 +1633,29 @@ class SettingsPage(TFrame):
         self.cookie_file_var.set(path or i18n.tr("cookie_file_none"))
         self._refresh_cookie_status()
 
+    def _on_platform_cookie_change(self, platform):
+        """按平台 Cookie 覆盖变更：只保存非默认项，保持 settings.json 干净。"""
+        var = self._platform_vars.get(platform)
+        if var is None:
+            return
+        label = var.get()
+        value = next((v for l, v in self._platform_cookie_options if l == label), "")
+        mapping = self.app.settings.get("platform_cookies")
+        mapping = dict(mapping) if isinstance(mapping, dict) else {}
+        if value:
+            mapping[platform] = value
+        else:
+            mapping.pop(platform, None)
+        self.app.settings["platform_cookies"] = mapping
+        settings.save(self.app.settings)
+        browser_cookies.set_platform_overrides(mapping)
+
+    def _on_dock_status_change(self):
+        self.app.settings["dock_status"] = bool(self.dock_var.get())
+        settings.save(self.app.settings)
+        if not self.dock_var.get():
+            dock.clear()  # 关掉后立刻清掉残留角标
+
     def _choose_cookie_file(self):
         path = filedialog.askopenfilename(
             initialdir=os.path.dirname(self.app.settings.get("cookie_file", "")) or None,
@@ -1659,6 +1723,8 @@ class App(tk.Tk):
         images.set_browser_cookies(self.settings.get("browser_cookies", ""))
         core.set_cookie_file(self.settings.get("cookie_file", ""))
         images.set_cookie_file(self.settings.get("cookie_file", ""))
+        browser_cookies.set_platform_overrides(
+            self.settings.get("platform_cookies", {}))
 
         self.title(i18n.tr("app_title"))
         self.minsize(*self.MIN_SIZE)

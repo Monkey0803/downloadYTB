@@ -28,6 +28,12 @@ from typing import Iterator, Optional
 _browser = ""
 # 空 = 不读取 cookies.txt
 _cookie_file = ""
+# 按平台覆盖：{"instagram": "chrome"}；值 "none" 表示该平台不使用 Cookie。
+# 未出现的平台沿用上面的全局设置。
+_platform_overrides = {}
+
+# 平台覆盖里表示「该平台不使用 Cookie」的哨兵值
+PLATFORM_NONE = "none"
 
 # yt-dlp / gallery-dl 在 Cookie 数据库或 cookies.txt 读取失败时的消息特征。
 _COOKIE_LOAD_ERROR_MARKERS = (
@@ -79,7 +85,42 @@ def set_cookie_file(path: str) -> None:
     _cookie_file = (path or "").strip()
 
 
-def browser() -> str:
+def set_platform_overrides(mapping) -> None:
+    """设置按平台的 Cookie 覆盖。
+
+    值是浏览器名，或 ``PLATFORM_NONE`` 表示该平台不使用 Cookie；未列出的
+    平台沿用全局设置。配置文件可能被手动编辑，因此这里做类型清洗。
+    """
+    global _platform_overrides
+    cleaned = {}
+    if isinstance(mapping, dict):
+        for platform, value in mapping.items():
+            if not isinstance(platform, str) or not isinstance(value, str):
+                continue
+            platform = platform.strip().lower()
+            value = value.strip().lower()
+            if not platform or not value:
+                continue
+            cleaned[platform] = value
+    _platform_overrides = cleaned
+
+
+def platform_overrides() -> dict:
+    return dict(_platform_overrides)
+
+
+def platform_override(platform: Optional[str]) -> Optional[str]:
+    """返回该平台的覆盖值；没有覆盖时返回 None（表示跟随全局）。"""
+    if not platform:
+        return None
+    return _platform_overrides.get(platform.strip().lower())
+
+
+def browser(platform: Optional[str] = None) -> str:
+    """该平台实际生效的浏览器名（覆盖优先于全局）。"""
+    override = platform_override(platform)
+    if override is not None:
+        return "" if override == PLATFORM_NONE else override
     return _browser
 
 
@@ -97,15 +138,26 @@ def cookie_file_missing() -> bool:
     return bool(_cookie_file) and not os.path.isfile(_cookie_file)
 
 
-def enabled() -> bool:
+def enabled(platform: Optional[str] = None) -> bool:
+    override = platform_override(platform)
+    if override is not None:
+        return override != PLATFORM_NONE
     return bool(_browser) or cookie_file_exists()
 
 
-def ytdlp_options() -> dict:
-    """返回 yt-dlp 的 Cookie 参数；cookies.txt 优先于浏览器读取。
+def ytdlp_options(platform: Optional[str] = None) -> dict:
+    """返回 yt-dlp 的 Cookie 参数。
 
-    cookies.txt 不依赖 TCC 与钥匙串，是打包 App 下最稳妥的方式。
+    优先级：该平台的覆盖 > 全局 cookies.txt > 全局浏览器。
+    平台覆盖是更具体的意图，所以即使存在全局 cookies.txt 也以它为准；
+    cookies.txt 优先于浏览器则是因为它不依赖 TCC 与钥匙串。
     """
+    override = platform_override(platform)
+    if override == PLATFORM_NONE:
+        return {}
+    if override:
+        return {"cookiesfrombrowser": (override,)}
+
     if cookie_file_exists():
         return {"cookiefile": _cookie_file}
     if _browser:
@@ -113,8 +165,14 @@ def ytdlp_options() -> dict:
     return {}
 
 
-def gallery_dl_cookies():
+def gallery_dl_cookies(platform: Optional[str] = None):
     """gallery-dl ``extractor.cookies`` 的值：cookie 文件路径或浏览器列表。"""
+    override = platform_override(platform)
+    if override == PLATFORM_NONE:
+        return None
+    if override:
+        return [override]
+
     if cookie_file_exists():
         return _cookie_file
     if _browser:
@@ -183,7 +241,7 @@ class _SilentLogger:
         pass
 
 
-def probe() -> ProbeResult:
+def probe(platform: Optional[str] = None) -> ProbeResult:
     """真实加载一次 Cookie，判断当前配置是否可用。
 
     刻意复用与解析完全相同的加载路径（``YoutubeDL.cookiejar``），因此结论就是
@@ -192,7 +250,7 @@ def probe() -> ProbeResult:
     代价是可能触发一次钥匙串访问，也可能耗时到秒级，所以只应在设置页按需调用
     （放进后台线程），不要挂在应用启动路径上。
     """
-    options = ytdlp_options()
+    options = ytdlp_options(platform)
     if not options:
         return ProbeResult(PROBE_OFF)
 

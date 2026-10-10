@@ -17,6 +17,7 @@ import yt_dlp
 
 from . import i18n
 from . import browser_cookies
+from . import platforms
 from .ffmpeg_util import ffmpeg_location_for_ytdlp
 
 DEFAULT_SAVE_DIR = os.path.expanduser("~/Downloads")
@@ -169,7 +170,7 @@ def _js_runtimes() -> dict:
     return _js_runtimes_cache
 
 
-def _base_opts(with_cookies: bool = True) -> dict:
+def _base_opts(with_cookies: bool = True, platform: Optional[str] = None) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -184,7 +185,7 @@ def _base_opts(with_cookies: bool = True) -> dict:
     if ffmpeg:
         opts["ffmpeg_location"] = ffmpeg
     if with_cookies:
-        opts.update(browser_cookies.ytdlp_options())
+        opts.update(browser_cookies.ytdlp_options(platform))
     return opts
 
 
@@ -262,6 +263,8 @@ def probe(url: str) -> VideoInfo:
     if not url:
         raise DownloadError(i18n.tr("enter_video_link"))
 
+    platform = platforms.detect(url)
+
     def extract(opts):
         # 解析阶段不做格式选择，避免无格式时直接抛
         # "Requested format is not available"
@@ -280,7 +283,7 @@ def probe(url: str) -> VideoInfo:
     # 而是先尝试匿名解析：不需要登录的内容仍能正常使用。
     cookie_error = None
     try:
-        info = extract(_base_opts())
+        info = extract(_base_opts(platform=platform))
     except DownloadError:
         raise
     except Exception as exc:  # yt_dlp 抛出多种异常类型，统一包装
@@ -294,9 +297,9 @@ def probe(url: str) -> VideoInfo:
             raise wrapped from exc
 
     if info is None or not _has_usable_formats(info):
-        if browser_cookies.enabled():
+        if browser_cookies.enabled(platform):
             try:
-                retry = extract(_base_opts(with_cookies=False))
+                retry = extract(_base_opts(with_cookies=False, platform=platform))
             except DownloadError:
                 retry = None
             except Exception:
@@ -534,7 +537,8 @@ def _run_download_with_cookie_fallback(url, opts, **kw) -> str:
     except DownloadError as exc:
         recoverable = (
             getattr(exc, "cookie_unavailable", False)
-            or (browser_cookies.enabled() and getattr(exc, "format_unavailable", False))
+            or (browser_cookies.enabled(platforms.detect(url))
+                and getattr(exc, "format_unavailable", False))
         )
         if not recoverable:
             raise
@@ -572,7 +576,7 @@ def download_video(
         fmt = "bestvideo+bestaudio/best"
 
     seen_files: set = set()
-    opts = _base_opts()
+    opts = _base_opts(platform=platforms.detect(url))
     opts.update(
         {
             "format": fmt,
@@ -600,7 +604,7 @@ def download_audio(
     """仅下载音频并转为 mp3，返回文件路径。"""
     os.makedirs(save_dir, exist_ok=True)
     seen_files: set = set()
-    opts = _base_opts()
+    opts = _base_opts(platform=platforms.detect(url))
     opts.update(
         {
             "format": f"{format_id}/bestaudio/best" if format_id else "bestaudio/best",

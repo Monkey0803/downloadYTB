@@ -21,6 +21,7 @@ import yt_dlp
 
 from . import i18n
 from . import browser_cookies
+from . import platforms
 from gallery_dl import config as gdl_config
 from gallery_dl import job as gdl_job
 
@@ -184,7 +185,8 @@ def _weibo_status_id(url: str, info: Optional[dict]) -> Optional[str]:
     return None
 
 
-def _weibo_ytdlp_options(with_cookies: bool = True) -> dict:
+def _weibo_ytdlp_options(with_cookies: bool = True,
+                         platform: Optional[str] = "weibo") -> dict:
     # 图片微博经常会被 yt-dlp 识别为“没有视频格式”；保留解析结果中的
     # 状态 ID，后续仍可从微博状态 API 读取图片/GIF。
     options = {
@@ -194,7 +196,7 @@ def _weibo_ytdlp_options(with_cookies: bool = True) -> dict:
         "ignore_no_formats_error": True,
     }
     if with_cookies:
-        options.update(browser_cookies.ytdlp_options())
+        options.update(browser_cookies.ytdlp_options(platform))
     return options
 
 
@@ -433,7 +435,7 @@ def _probe_weibo_images(url: str) -> ImagePost:
     info = None
     extract_error = None
     cookie_fallback = ""
-    attempts = (True, False) if browser_cookies.enabled() else (False,)
+    attempts = (True, False) if browser_cookies.enabled("weibo") else (False,)
     for index, with_cookies in enumerate(attempts):
         try:
             ydl = yt_dlp.YoutubeDL(_weibo_ytdlp_options(with_cookies))
@@ -573,7 +575,7 @@ def probe_images(url: str) -> ImagePost:
     gdl_config.set(("extractor", "instagram"), "videos", False)
     # X 图片默认就是 orig；显式声明保证拿到最高清原图
     gdl_config.set(("extractor", "twitter"), "size", "orig")
-    gdl_cookies = browser_cookies.gallery_dl_cookies()
+    gdl_cookies = browser_cookies.gallery_dl_cookies(platforms.detect(url))
     if gdl_cookies is not None:
         # gallery-dl 在 Cookie 读取失败时只记录警告并继续，不会中断解析。
         gdl_config.set(("extractor",), "cookies", gdl_cookies)
