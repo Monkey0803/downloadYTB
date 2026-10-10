@@ -28,13 +28,15 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - YouTube downloads can include subtitles (manual and automatic are both attempted, saved as .srt).
 - A video thumbnail preview appears after probing, so you can confirm the video before downloading.
 - Re-downloading the same image post skips existing files instead of creating numbered copies (can be turned off in Settings).
+- Playlist and channel links are supported: after probing you are told "this is a playlist with N items" and can pick the current video only, the first 10/25/50, or all of them (the default is the current video only, so a whole channel is never downloaded by accident).
+- Taskbar progress: a Dock badge on macOS, and a real taskbar progress bar on Windows that flashes the window on completion (Linux only on some desktops).
 - ffmpeg is supplied through imageio-ffmpeg; a separate ffmpeg installation is normally unnecessary.
 
 ## Supported platforms
 
 | Platform | Video | Audio only | Images | Notes |
 | --- | --- | --- | --- | --- |
-| YouTube | Yes | Yes | - | Quality and estimated size come from probing; subtitles optional |
+| YouTube | Yes | Yes | - | Quality and estimated size come from probing; subtitles optional; playlists and channels supported |
 | X / Twitter | Yes | Yes | Yes | Image downloads use original-image URLs |
 | Instagram | Yes | Yes | Yes | Browser cookies are commonly required |
 | Douyin | Yes | Yes | - | Usually exposes a single audio-video stream |

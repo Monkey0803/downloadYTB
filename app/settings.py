@@ -21,6 +21,7 @@ DEFAULTS = {
     "skip_existing_images": True,  # 图片已存在时跳过而不是另存副本
     "audio_format": "mp3",    # 仅音频目标格式：mp3 / m4a / opus / flac
     "subtitles_enabled": False,   # 视频下载时是否同时下载字幕
+    "playlist_limit": 1,      # 播放列表下载范围：1=仅当前视频，0=全部，其余=前 N 个
     "subtitle_langs": "",     # 逗号分隔的字幕语言；空表示用代码内默认值
     "window_geometry": "",    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint

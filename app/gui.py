@@ -252,6 +252,17 @@ class VideoPanel(TFrame):
             self.opt_row2, i18n.tr("download_subtitles"), self.subtitle_var,
             font=f.f_btn, width=_check_pill_width(f.f_btn, i18n.tr("download_subtitles")),
             bg_role="CARD")
+        # 播放列表下载范围（只有解析到播放列表时才出现）
+        self.range_label = TLabel(self.opt_row2, text=i18n.tr("playlist_range"),
+                                  font=f.f_body, bg_role="CARD", fg_role="TEXT_SUB")
+        self.playlist_limit_var = tk.StringVar(
+            value=self._playlist_limit_label(self.app.settings.get("playlist_limit", 1)))
+        self.playlist_limit_var.trace_add(
+            "write", lambda *a: self._on_playlist_range_change())
+        self.range_select = PillSelect(
+            self.opt_row2, self.playlist_limit_var,
+            values=[self._playlist_limit_label(v) for v in core.PLAYLIST_LIMITS],
+            font=f.f_btn, width=150)
         self._refresh_option_visibility()
 
         # —— 卡片 3：保存位置 ——
@@ -366,8 +377,15 @@ class VideoPanel(TFrame):
         elif not show_subs:
             self.subtitle_check.pack_forget()
 
+        show_range = bool(self._info and self._info.playlist_count)
+        for widget in (self.range_label, self.range_select):
+            if show_range and not widget.winfo_manager():
+                widget.pack(side="left", padx=(22, 8) if widget is self.range_label else 0)
+            elif not show_range:
+                widget.pack_forget()
+
         # 第二行没有内容时不占位，避免非 YouTube 视频页多出一条空白
-        if audio or show_subs:
+        if audio or show_subs or show_range:
             if not self.opt_row2.winfo_manager():
                 self.opt_row2.pack(fill="x", pady=(10, 0))
         else:
@@ -390,6 +408,27 @@ class VideoPanel(TFrame):
             else:
                 self.quality_label.configure(text=i18n.tr("quality"))
                 self.quality_select.set_enabled(has_qualities)
+
+    def _playlist_limit_label(self, limit):
+        value = int(limit or 0)
+        if value <= 0:
+            return i18n.tr("playlist_range_all")
+        if value == 1:
+            return i18n.tr("playlist_range_current")
+        return i18n.tr("playlist_range_n", n=value)
+
+    def _playlist_limit_value(self, label):
+        for value in core.PLAYLIST_LIMITS:
+            if self._playlist_limit_label(value) == label:
+                return value
+        return 1
+
+    def _playlist_limit(self):
+        return self._playlist_limit_value(self.playlist_limit_var.get())
+
+    def _on_playlist_range_change(self):
+        self.app.settings["playlist_limit"] = self._playlist_limit()
+        settings.save(self.app.settings)
 
     def _on_audio_format_change(self):
         self.app.settings["audio_format"] = self._audio_format()
@@ -537,6 +576,23 @@ class VideoPanel(TFrame):
         self._set_status(info.warning or i18n.tr("probe_success_video"),
                          ok=not info.warning)
 
+    def _title_text(self, info):
+        """标题行文字与后缀。
+
+        播放列表时改为说明「这是一个播放列表、共多少条」：旧版本遇到播放列表
+        链接会静默只下载第一条，用户根本不知道这是个列表。
+        """
+        if not info.playlist_count:
+            suffix = (f"  ·  {info.uploader}" if info.uploader else "") \
+                + f"  ·  {info.duration_text}"
+            return info.title, suffix
+        count_text = i18n.tr(
+            "playlist_count_at_least" if info.playlist_truncated
+            else "playlist_count_exact", n=info.playlist_count)
+        return i18n.tr("playlist_summary",
+                       title=info.playlist_title or info.title,
+                       count=count_text), ""
+
     def _height_for_label(self, label):
         if not self._info:
             return None
@@ -633,12 +689,28 @@ class VideoPanel(TFrame):
                           and self.platform == "YouTube"
                           and bool(self.subtitle_var.get())),
             "subtitle_langs": self.app.settings.get("subtitle_langs", ""),
+            # 只有解析到播放列表时才可能扩大下载范围；否则固定为「仅当前视频」
+            "is_playlist": bool(self._info.playlist_count),
+            "playlist_limit": (self._playlist_limit()
+                               if self._info.playlist_count else 1),
+            "playlist_title": self._info.playlist_title if self._info.playlist_count else "",
+            "playlist_total": self._playlist_total(),
         }
         self._last_file = None
         self._last_percent = 0.0
         self.open_btn.configure_state("disabled")
         self.progress.set(0)
         self._start_download(resume=False)
+
+    def _playlist_total(self):
+        """整批进度需要的总数：限量时就是限量值，否则用解析到的条目数。"""
+        if not self._info or not self._info.playlist_count:
+            return 0
+        limit = self._playlist_limit()
+        if limit > 0:
+            return limit
+        # 「全部」但解析被限量截断时总数未知，交给界面退化成「第 i 个」
+        return 0 if self._info.playlist_truncated else self._info.playlist_count
 
     def _probe_then_download(self, url):
         """「开始下载」时尚未解析：自动解析，成功后立即接着下载。"""
@@ -736,6 +808,15 @@ class VideoPanel(TFrame):
                                                bitrate_kbps=p["audio_bitrate"],
                                                format_id=p["audio_format_id"],
                                                audio_format=p["audio_format"])
+                elif p["is_playlist"] and p["playlist_limit"] != 1:
+                    paths = core.download_playlist(
+                        p["url"], height=p["height"], save_dir=p["save_dir"],
+                        playlist_limit=p["playlist_limit"],
+                        playlist_title=p["playlist_title"],
+                        playlist_total=p["playlist_total"],
+                        progress=on_progress, entry_progress=on_entry,
+                        cancel_event=cancel_event, pause_event=pause_event,
+                        subtitles=p["subtitles"], subtitle_langs=p["subtitle_langs"])
                 else:
                     path = core.download_video(p["url"], height=p["height"],
                                                save_dir=p["save_dir"],
@@ -753,7 +834,8 @@ class VideoPanel(TFrame):
             except Exception as exc:
                 self.after(0, self._download_failed, i18n.tr("download_failed", message=exc))
             else:
-                self.after(0, self._download_done, path)
+                # 播放列表返回多条路径，单视频/仅音频返回一条
+                self.after(0, self._download_done, paths if paths else path)
 
         threading.Thread(target=work, daemon=True).start()
 

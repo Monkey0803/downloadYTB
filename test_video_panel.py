@@ -154,5 +154,99 @@ class VideoThumbnailTests(unittest.TestCase):
         self.assertIsNone(self.panel._thumb_photo)
 
 
+
+class PlaylistUiTests(unittest.TestCase):
+    """播放列表界面（#11）：范围选择器的取值/可见性与标题行文案。"""
+
+    def setUp(self):
+        self.saved = {}
+        settings_mod.load = lambda: _fake_load()
+        settings_mod.save = lambda data: self.saved.update(data)
+        gui.menubar.create = lambda *a, **kw: None
+        self.app = gui.App()
+        self.app.show_page("youtube")
+        self.panel = self.app.pages["youtube"].video_panel
+        self.app.update_idletasks()
+
+    def tearDown(self):
+        settings_mod.load = _ORIGINAL_LOAD
+        settings_mod.save = _ORIGINAL_SAVE
+        gui.menubar.create = _ORIGINAL_MENUBAR
+        self.app.destroy()
+
+    def _playlist_info(self, count=100, truncated=True, title="My List"):
+        return core.VideoInfo(
+            url="u", title="First video", duration=60, uploader="Someone",
+            qualities=[], audio_options=[], thumbnail="",
+            playlist_title=title, playlist_count=count,
+            playlist_truncated=truncated, playlist_entries=["First", "Second"])
+
+    def test_limit_label_round_trip(self):
+        for value in core.PLAYLIST_LIMITS:
+            label = self.panel._playlist_limit_label(value)
+            self.assertEqual(self.panel._playlist_limit_value(label), value,
+                             f"{value} <-> {label!r} 不能往返")
+
+    def test_range_hidden_for_single_video(self):
+        self.panel._probe_done(core.VideoInfo(url="u", title="单视频", duration=10,
+                                              uploader="", qualities=[],
+                                              audio_options=[], thumbnail=""))
+        self.app.update_idletasks()
+        self.assertFalse(self.panel.range_select.winfo_manager())
+        self.assertFalse(self.panel.range_label.winfo_manager())
+
+    def test_range_visible_for_playlist(self):
+        self.panel._probe_done(self._playlist_info())
+        self.app.update_idletasks()
+        self.assertTrue(self.panel.range_select.winfo_manager())
+        self.assertTrue(self.panel.range_label.winfo_manager())
+
+    def test_title_line_announces_playlist(self):
+        info = self._playlist_info()
+        text, suffix = self.panel._title_text(info)
+        self.assertIn("My List", text)
+        self.assertIn("至少 100", text)     # 被限量截断时不能谎报总数
+        self.assertEqual(suffix, "")
+
+    def test_title_line_exact_count_for_small_playlist(self):
+        info = self._playlist_info(count=3, truncated=False)
+        text, _ = self.panel._title_text(info)
+        self.assertIn("My List", text)
+        self.assertIn("3 个视频", text)
+        self.assertNotIn("至少", text)
+
+    def test_single_video_title_keeps_uploader_and_duration(self):
+        info = core.VideoInfo(url="u", title="标题", duration=125, uploader="作者",
+                              qualities=[], audio_options=[], thumbnail="")
+        text, suffix = self.panel._title_text(info)
+        self.assertEqual(text, "标题")
+        self.assertIn("作者", suffix)
+
+    def test_total_uses_limit_when_limited(self):
+        self.panel._probe_done(self._playlist_info(count=100, truncated=True))
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(10))
+        self.app.update_idletasks()
+        self.assertEqual(self.panel._playlist_total(), 10)
+
+    def test_total_is_zero_when_unknown(self):
+        """「全部」且解析被截断时总数未知，只能退化成「第 i 个」。"""
+        self.panel._probe_done(self._playlist_info(count=100, truncated=True))
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(0))
+        self.app.update_idletasks()
+        self.assertEqual(self.panel._playlist_total(), 0)
+
+    def test_total_uses_count_when_known(self):
+        self.panel._probe_done(self._playlist_info(count=3, truncated=False))
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(0))
+        self.app.update_idletasks()
+        self.assertEqual(self.panel._playlist_total(), 3)
+
+    def test_range_choice_is_persisted(self):
+        self.panel._probe_done(self._playlist_info())
+        self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(25))
+        self.app.update_idletasks()
+        self.assertEqual(self.saved.get("playlist_limit"), 25)
+        self.assertEqual(self.panel._playlist_limit(), 25)
+
 if __name__ == "__main__":
     unittest.main()

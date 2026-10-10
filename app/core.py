@@ -30,6 +30,14 @@ DEFAULT_AUDIO_FORMAT = "mp3"
 # 字幕默认语言：留空时用这几项，避免 "all" 拉下上百种自动字幕。
 DEFAULT_SUBTITLE_LANGS = ("zh-Hans", "zh-Hant", "en")
 
+# 播放列表：解析阶段只做「扁平 + 限量」抽取。实测一个 5300 条的频道，
+# 不限量的扁平抽取要 56 秒、非扁平超过 200 秒仍不返回；限量 100 只要 1.6 秒。
+PLAYLIST_PREVIEW_LIMIT = 100
+PLAYLIST_PREVIEW_TITLES = 8      # 界面上预览几个条目标题
+PLAYLIST_LIMIT_ALL = 0           # 0 = 整个播放列表
+# 界面提供的条数选项（1 表示只下载当前视频，保持历史行为）
+PLAYLIST_LIMITS = (1, 10, 25, 50, PLAYLIST_LIMIT_ALL)
+
 
 def set_browser_cookies(browser: str):
     """设置 yt-dlp 从哪个浏览器读取 Cookie（空字符串为禁用）。"""
@@ -108,6 +116,11 @@ class VideoInfo:
     audio_options: List[AudioOption] = field(default_factory=list)  # 可用音频比特率（降序）
     warning: str = ""  # 非致命的降级提示（如浏览器 Cookie 读取失败后改用匿名解析）
     thumbnail: str = ""  # 视频封面直链，用于下载前的预览
+    # 播放列表元信息；非播放列表时 playlist_count 为 0
+    playlist_title: str = ""
+    playlist_count: int = 0
+    playlist_truncated: bool = False   # 条目数被 PLAYLIST_PREVIEW_LIMIT 截断
+    playlist_entries: List[str] = field(default_factory=list)  # 前几个条目标题
 
     @property
     def heights(self) -> List[int]:
@@ -300,25 +313,69 @@ def probe(url: str) -> VideoInfo:
 
     platform = platforms.detect(url)
 
-    def extract(opts):
+    def extract(opts, target=None):
         # 解析阶段不做格式选择，避免无格式时直接抛
         # "Requested format is not available"
         opts["ignore_no_formats_error"] = True
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-        # 播放列表/多视频时取第一个条目
-        if info.get("_type") == "playlist":
-            entries = info.get("entries") or []
-            if not entries:
-                raise DownloadError(i18n.tr("error_no_video"))
-            info = entries[0]
+            info = ydl.extract_info(target or url, download=False)
         return info
+
+    def probe_opts(with_cookies=True):
+        opts = _base_opts(with_cookies=with_cookies, platform=platform)
+        # 播放列表只做「扁平 + 限量」抽取（实测 5300 条的频道不限量要 56 秒，
+        # 非扁平超过 200 秒仍不返回；限量 100 只要 1.6 秒）。
+        # 关键是 noplaylist 保持 True：这样 "watch?v=X&list=Y" 仍旧按单个
+        # 视频处理，历史行为不变，只有真正没有视频 ID 的播放列表链接才会
+        # 走到下面的播放列表分支。
+        opts.update({
+            "extract_flat": "in_playlist",
+            "playlistend": PLAYLIST_PREVIEW_LIMIT,
+        })
+        return opts
+
+    def resolve(raw):
+        """把（可能是播放列表的）解析结果规整为 (视频 info, 播放列表元信息)。
+
+        扁平条目没有 formats，所以再完整解析第一个条目，界面的清晰度下拉才有
+        内容；解析不出来就退回扁平条目，宁可没有档位表也不要整体失败。
+        """
+        empty = ("", 0, False, [], None)
+        if raw is None or raw.get("_type") != "playlist":
+            return raw, empty
+        entries = [e for e in (raw.get("entries") or []) if e]
+        if not entries:
+            raise DownloadError(i18n.tr("error_no_video"))
+        meta = (
+            raw.get("title") or "",
+            len(entries),
+            len(entries) >= PLAYLIST_PREVIEW_LIMIT,
+            [(e.get("title") or "").strip()
+             for e in entries[:PLAYLIST_PREVIEW_TITLES]],
+            entries[0],
+        )
+        first_url = entries[0].get("url") or entries[0].get("webpage_url") or ""
+        resolved = None
+        if first_url:
+            # 带上 Cookie 解析一次；打包 App 未获完全磁盘访问权限读不到浏览器
+            # Cookie 时，这里会失败——必须像单视频那样匿名重试，否则播放列表
+            # 会没有档位表（界面上清晰度下拉是空的）。
+            attempts = ((True, False) if browser_cookies.enabled(platform) else (True,))
+            for with_cookies in attempts:
+                try:
+                    resolved = extract(
+                        _base_opts(with_cookies=with_cookies, platform=platform),
+                        target=first_url)
+                    break
+                except Exception:
+                    resolved = None
+        return (resolved or entries[0]), meta
 
     # cookie_error 记录「浏览器 Cookie 读取失败」；此时不再直接报错，
     # 而是先尝试匿名解析：不需要登录的内容仍能正常使用。
     cookie_error = None
     try:
-        info = extract(_base_opts(platform=platform))
+        info = extract(probe_opts())
     except DownloadError:
         raise
     except Exception as exc:  # yt_dlp 抛出多种异常类型，统一包装
@@ -331,22 +388,31 @@ def probe(url: str) -> VideoInfo:
         else:
             raise wrapped from exc
 
+    info, playlist = resolve(info)
+
     if info is None or not _has_usable_formats(info):
         if browser_cookies.enabled(platform):
             try:
-                retry = extract(_base_opts(with_cookies=False, platform=platform))
+                retry = extract(probe_opts(with_cookies=False))
             except DownloadError:
                 retry = None
             except Exception:
                 retry = None
-            if retry is not None and _has_usable_formats(retry):
-                info = retry
+            if retry is not None:
+                retry_info, retry_playlist = resolve(retry)
+                if _has_usable_formats(retry_info) or retry_playlist[1]:
+                    info, playlist = retry_info, retry_playlist
         if info is None or not _has_usable_formats(info):
-            # Cookie 读取失败且匿名也拿不到格式时才报错，此时 Cookie 就是
-            # 最可能的原因，直接给出可操作的指引。
-            if cookie_error is not None:
+            if playlist[1]:
+                # 播放列表：第一个条目拿不到档位表也照常放行，下载按最佳画质，
+                # 不能因为一个条目解析不出格式就让整个播放列表失败。
+                info = info or playlist[4] or {}
+            elif cookie_error is not None:
+                # Cookie 读取失败且匿名也拿不到格式时才报错，此时 Cookie 就是
+                # 最可能的原因，直接给出可操作的指引。
                 raise cookie_error
-            raise _wrap_error(Exception("Requested format is not available"))
+            else:
+                raise _wrap_error(Exception("Requested format is not available"))
 
     # 按标准档位（format_note 中的 1080p/720p…）归并清晰度。
     # 直接用 height 会得到 804/536 这类非标准数值（宽银幕视频的实际高度），
@@ -444,9 +510,29 @@ def probe(url: str) -> VideoInfo:
         qualities=qualities,
         audio_options=audio_options,
         thumbnail=info.get("thumbnail") or "",
+        playlist_title=playlist[0],
+        playlist_count=playlist[1],
+        playlist_truncated=playlist[2],
+        playlist_entries=playlist[3],
         # 解析成功但浏览器 Cookie 被跳过：如实告知，避免用户以为用的是登录态。
         warning=i18n.tr("cookie_fallback_warning") if cookie_error is not None else "",
     )
+
+
+def _playlist_position(d: dict, playlist_total: Optional[int] = None):
+    """从进度回调里取播放列表位置。
+
+    ``playlist_count`` 在 yt-dlp 里经常是 None（实测 YouTube 频道页就不给），
+    所以总数优先取 info 里的，取不到就用调用方已知的总数（限量值或解析结果）。
+    两者都没有时返回 (None, None)，界面就只能退化成「第 i 个」。
+    """
+    info = d.get("info_dict") or {}
+    index = info.get("playlist_index") or info.get("playlist_autonumber")
+    count = info.get("playlist_count") or playlist_total
+    title = info.get("title") or ""
+    if not index or not count:
+        return index, None, title
+    return int(index), int(count), title
 
 
 def _make_progress_hook(
@@ -454,7 +540,14 @@ def _make_progress_hook(
     cancel_event: Optional[threading.Event] = None,
     seen_files: Optional[set] = None,
     pause_event: Optional[threading.Event] = None,
+    entry_callback: Optional[Callable[[int, int, str], None]] = None,
+    playlist_total: Optional[int] = None,
 ):
+    # bestvideo+bestaudio 会为同一个条目产生两段进度（视频流下完再下音频流），
+    # 第二段从 0 开始，直接换算会让整批进度条倒退。用单调不减钳制住。
+    highest = {"value": 0.0}
+    last_entry = {"value": None}
+
     def hook(d: dict):
         # 记录 yt-dlp 正在写入的文件，供取消后清理 .part 等残留
         if seen_files is not None:
@@ -468,6 +561,13 @@ def _make_progress_hook(
             # 与取消一样借 DownloadCancelled 中断 yt-dlp，
             # 但 _run_download 中按 pause_event 区分处理，保留临时文件
             raise yt_dlp.utils.DownloadCancelled("用户暂停下载")
+        index, count, entry_title = _playlist_position(d, playlist_total)
+        if entry_callback is not None and index:
+            # 进度钩子每秒触发几十次；只在「换条目」时通知界面，避免刷爆状态栏
+            current = (index, entry_title)
+            if current != last_entry["value"]:
+                last_entry["value"] = current
+                entry_callback(index, count or 0, entry_title)
         if callback is None:
             return
         status = d.get("status")
@@ -475,6 +575,13 @@ def _make_progress_hook(
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes") or 0
             percent = (downloaded / total * 100) if total else None
+            if percent is not None and count and index:
+                # 播放列表：进度条表示整批的进度，而不是当前这一个文件。
+                # 上限取 min：总数估小（例如 probe 只看到前 100 条）时不要把
+                # 进度条推过 100%。
+                overall = min(100.0, ((index - 1) + percent / 100.0) / count * 100)
+                percent = max(highest["value"], overall)
+                highest["value"] = percent
 
             speed = d.get("speed")
             speed_text = f"{speed / 1024 / 1024:.2f} MB/s" if speed else "--"
@@ -487,7 +594,13 @@ def _make_progress_hook(
                 eta_text = "--"
             callback(percent, speed_text, eta_text, "downloading")
         elif status == "finished":
-            callback(100.0, "--", "--", "merging")
+            # 播放列表里每个条目结束后都会到 finished，此时不能把整条进度
+            # 拉满（否则第一个视频下完进度条就显示 100%）
+            done = min(100.0, index / count * 100) if (count and index) else 100.0
+            if count and index:
+                done = max(highest["value"], done)
+                highest["value"] = done
+            callback(done, "--", "--", "merging")
 
     return hook
 
@@ -512,8 +625,14 @@ def _run_download(
     cancel_event: Optional[threading.Event] = None,
     seen_files: Optional[set] = None,
     pause_event: Optional[threading.Event] = None,
+    collected: Optional[list] = None,
+    info_out: Optional[list] = None,
 ) -> str:
-    """执行下载并返回最终产物文件路径。"""
+    """执行下载并返回最终产物文件路径。
+
+    collected 传入列表时，所有后处理完成的文件都会被追加进去（播放列表会有
+    多个产物），返回值仍是最后一个产物路径。
+    """
     final_path = {"value": None}
 
     def on_postprocess(d):
@@ -523,6 +642,8 @@ def _run_download(
             path = info.get("filepath") or info.get("_filename")
             if path:
                 final_path["value"] = path
+                if collected is not None and path not in collected:
+                    collected.append(path)
 
     opts = dict(opts)
     opts.setdefault("postprocessor_hooks", []).append(on_postprocess)
@@ -546,6 +667,10 @@ def _run_download(
         if pause_event is not None and pause_event.is_set():
             raise DownloadPaused(seen_files) from exc
         raise _wrap_error(exc) from exc
+
+    if info_out is not None:
+        # 必须在把播放列表拆成第一个条目之前交出去
+        info_out.append(info)
 
     if info.get("_type") == "playlist":
         entries = info.get("entries") or []
@@ -630,6 +755,109 @@ def download_video(
     return _run_download_with_cookie_fallback(
         url, opts, cancel_event=cancel_event,
         seen_files=seen_files, pause_event=pause_event)
+
+
+def _paths_from_info(info) -> List[str]:
+    """从 yt-dlp 返回的 info（可能是播放列表）里按顺序取出产物路径。
+
+    不能只依赖后处理钩子：站点给出单文件格式时不会发生合并，钩子就不会触发，
+    那时只能从 info 的 filepath / requested_downloads 里取。
+    """
+    out: List[str] = []
+
+    def add(entry):
+        if not isinstance(entry, dict):
+            return
+        for candidate in (
+            (entry.get("requested_downloads") or [{}])[0].get("filepath"),
+            entry.get("filepath"),
+            entry.get("_filename"),
+        ):
+            if candidate and os.path.isfile(candidate) and candidate not in out:
+                out.append(candidate)
+                return
+
+    if isinstance(info, dict) and info.get("_type") == "playlist":
+        for entry in (info.get("entries") or []):
+            add(entry)
+    add(info)
+    return out
+
+
+def _safe_dirname(name: str) -> str:
+    """把播放列表标题变成安全的目录名。"""
+    cleaned = re.sub(r'[\\/:*?"<>|]+', "_", (name or "").strip()).strip(" .")
+    return cleaned[:120] or "playlist"
+
+
+def download_playlist(
+    url: str,
+    height: Optional[int] = None,
+    save_dir: str = DEFAULT_SAVE_DIR,
+    playlist_limit: int = PLAYLIST_LIMIT_ALL,
+    playlist_title: str = "",
+    progress: Optional[ProgressCallback] = None,
+    entry_progress=None,
+    cancel_event: Optional[threading.Event] = None,
+    pause_event: Optional[threading.Event] = None,
+    subtitles: bool = False,
+    subtitle_langs=None,
+    playlist_total: Optional[int] = None,
+) -> List[str]:
+    """下载播放列表，返回所有产物路径（按列表顺序）。
+
+    playlist_limit 为 0 表示整个播放列表，否则只下载前 N 个（playlistend）。
+    整批进度由 progress 回调给出（percent 是整批的百分比），单个条目的位置
+    通过 entry_progress(index, count, title) 回调告知界面；count 可能为 0，
+    因为 yt-dlp 常常不提供总数（此时需要调用方用 playlist_total 传入）。
+
+    产物落在 save_dir/<播放列表标题>/ 下，避免不同条目的同名文件互相覆盖。
+
+    取消/暂停语义与 download_video 一致；续传时重复调用本函数即可，yt-dlp 会
+    跳过已下载的条目。
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    if height:
+        fmt = (
+            f"bestvideo[height<={height}]+bestaudio"
+            f"/best[height<={height}]"
+            f"/bestvideo+bestaudio/best"
+        )
+    else:
+        fmt = "bestvideo+bestaudio/best"
+
+    seen_files: set = set()
+    collected: List[str] = []
+    info_out: List[dict] = []
+    opts = _base_opts(platform=platforms.detect(url))
+    opts.update({
+        "noplaylist": False,
+        "format": fmt,
+        "outtmpl": os.path.join(save_dir, _safe_dirname(playlist_title),
+                                "%(title).120B [%(id)s].%(ext)s"),
+        "merge_output_format": "mp4",
+        "progress_hooks": [
+            _make_progress_hook(progress, cancel_event, seen_files, pause_event,
+                                entry_progress, playlist_total)
+        ],
+    })
+    limit = int(playlist_limit or 0)
+    if limit > 0:
+        opts["playlistend"] = limit
+    if subtitles:
+        opts.update(subtitle_options(subtitle_langs))
+
+    _run_download_with_cookie_fallback(
+        url, opts, cancel_event=cancel_event, seen_files=seen_files,
+        pause_event=pause_event, collected=collected, info_out=info_out)
+
+    paths = _paths_from_info(info_out[0] if info_out else {})
+    for path in collected:
+        if path not in paths and os.path.isfile(path):
+            paths.append(path)
+    if not paths:
+        raise DownloadError(i18n.tr("error_output_missing"))
+    return paths
 
 
 def _audio_postprocessor(audio_format: str, bitrate_kbps: int) -> dict:
