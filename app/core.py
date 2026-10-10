@@ -85,7 +85,8 @@ class QualityOption:
     def display(self) -> str:
         """下拉框展示文案，如 "1080p ・ 约 245 MB"。"""
         size = format_size(self.size_bytes)
-        return f"{self.label} ・ 约 {size}" if size else self.label
+        return (f"{self.label} ・ {i18n.tr('size_approx', size=size)}"
+                if size else self.label)
 
 
 @dataclass
@@ -100,7 +101,8 @@ class AudioOption:
     def display(self) -> str:
         size = format_size(self.size_bytes)
         label = f"{self.bitrate_kbps} kbps"
-        return f"{label} ・ 约 {size}" if size else label
+        return (f"{label} ・ {i18n.tr('size_approx', size=size)}"
+                if size else label)
 
 
 @dataclass
@@ -135,7 +137,7 @@ class VideoInfo:
     @property
     def duration_text(self) -> str:
         if not self.duration:
-            return "未知时长"
+            return i18n.tr("duration_unknown")
         total = int(self.duration)
         h, rem = divmod(total, 3600)
         m, s = divmod(rem, 60)
@@ -503,7 +505,7 @@ def probe(url: str) -> VideoInfo:
 
     return VideoInfo(
         url=url,
-        title=info.get("title") or "未命名视频",
+        title=info.get("title") or i18n.tr("untitled_video"),
         duration=info.get("duration"),
         uploader=info.get("uploader") or info.get("channel") or "",
         qualities=qualities,
@@ -588,7 +590,9 @@ def _make_progress_hook(
             eta = d.get("eta")
             if eta is not None:
                 m, s = divmod(int(eta), 60)
-                eta_text = f"{m}分{s:02d}秒" if m else f"{s}秒"
+                # 秒数先补零再作为值传入：翻译字符串里做不了 :02d 格式化
+                eta_text = (i18n.tr("eta_minutes", minutes=m, seconds=f"{s:02d}") if m
+                            else i18n.tr("eta_seconds", seconds=s))
             else:
                 eta_text = "--"
             callback(percent, speed_text, eta_text, "downloading")

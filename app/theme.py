@@ -97,8 +97,6 @@ DARK = Palette(
     CHECK_BORDER="#4A5264",
 )
 
-MODES = [("跟随系统", "system"), ("浅色", "light"), ("深色", "dark")]
-
 _mode = "system"
 _current = LIGHT
 

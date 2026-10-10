@@ -237,10 +237,10 @@ def _weibo_load_jsonp(text: str) -> dict:
     start = (text or "").find("{")
     end = (text or "").rfind("}")
     if start < 0 or end < start:
-        raise ValueError("微博访客接口返回了无效数据")
+        raise ValueError(i18n.tr("weibo_invalid_response"))
     data = json.loads(text[start:end + 1])
     if not isinstance(data, dict):
-        raise ValueError("微博访客接口返回了无效数据")
+        raise ValueError(i18n.tr("weibo_invalid_response"))
     return data
 
 
@@ -264,7 +264,7 @@ def _weibo_update_visitor_session(session: requests.Session):
     response.raise_for_status()
     visitor_data = _weibo_load_jsonp(response.text).get("data")
     if not isinstance(visitor_data, dict) or not visitor_data.get("tid"):
-        raise ValueError("微博访客 Cookie 创建失败")
+        raise ValueError(i18n.tr("weibo_cookie_failed"))
 
     response = session.get(
         "https://passport.weibo.com/visitor/visitor",
@@ -299,7 +299,7 @@ def _weibo_status_data(session: requests.Session, status_id: str) -> dict:
     response.raise_for_status()
     data = response.json()
     if not isinstance(data, dict):
-        raise ValueError("微博状态接口返回了无效数据")
+        raise ValueError(i18n.tr("weibo_invalid_response"))
     return data
 
 

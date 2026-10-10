@@ -9,7 +9,7 @@ import os
 import sys
 import tkinter as tk
 
-from . import theme
+from . import i18n, theme
 
 
 def _round_rect_points(x1, y1, x2, y2, r):
@@ -645,7 +645,7 @@ class ImagePicker(tk.Frame):
                                image=photo, anchor="center")
             else:
                 c.create_text(x + self.CELL_W / 2, y + self.THUMB_H / 2,
-                              text="加载中…", fill=pal.TEXT_SUB,
+                              text=i18n.tr("loading"), fill=pal.TEXT_SUB,
                               font=it.get("font_small"))
             # 右上角复选标记
             bx = x + self.CELL_W - 24

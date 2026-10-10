@@ -15,7 +15,7 @@ import os
 import platform
 import sys
 
-from . import browser_cookies
+from . import browser_cookies, i18n
 
 # 最近一次在界面上展示过的错误，供报告引用
 _last_error = ""
@@ -43,47 +43,48 @@ def _dependency_version(module_name: str) -> str:
     try:
         module = __import__(module_name)
     except Exception as exc:
-        return f"不可用（{exc.__class__.__name__}）"
+        return i18n.tr("diag_unavailable_exc", name=exc.__class__.__name__)
     version = getattr(getattr(module, "version", None), "__version__", None)
     if version:
         return str(version)
-    return str(getattr(module, "__version__", "未知"))
+    return str(getattr(module, "__version__", i18n.tr("diag_unknown")))
 
 
 def _ffmpeg_line() -> str:
     try:
         from .ffmpeg_util import ffmpeg_location_for_ytdlp
     except Exception:
-        return "不可用"
+        return i18n.tr("diag_unavailable")
     path = ffmpeg_location_for_ytdlp()
     if not path:
-        return "未找到"
-    exists = "存在" if os.path.exists(path) else "缺失"
-    return f"{_sanitize(path)}（{exists}）"
+        return i18n.tr("diag_not_found")
+    state = i18n.tr("diag_exists" if os.path.exists(path) else "diag_missing")
+    return i18n.tr("diag_path_state", path=_sanitize(path), state=state)
 
 
 def _cookie_lines(probe) -> list:
     browser = browser_cookies.browser()
-    source = "未启用"
+    source = i18n.tr("diag_source_off")
     if browser_cookies.cookie_file_exists():
         source = "cookies.txt"
     elif browser_cookies.cookie_file_missing():
-        source = "cookies.txt（已配置但文件不存在）"
+        source = i18n.tr("diag_source_file_missing")
     elif browser:
-        source = f"浏览器 {browser}"
+        source = i18n.tr("diag_source_browser", browser=browser)
 
     if probe is None:
-        status = "未检测"
+        status = i18n.tr("diag_status_not_checked")
     elif probe.status == browser_cookies.PROBE_OK:
-        status = f"可用（读取到 {probe.cookie_count} 条）"
+        status = i18n.tr("diag_status_ok", count=probe.cookie_count)
     elif probe.status == browser_cookies.PROBE_OFF:
-        status = "未启用"
+        status = i18n.tr("diag_source_off")
     else:
-        status = "不可用"
+        status = i18n.tr("diag_unavailable")
 
-    lines = [f"- Cookie 来源: {source}", f"- Cookie 状态: {status}"]
+    lines = [i18n.tr("diag_cookie_source", source=source),
+             i18n.tr("diag_cookie_status", status=status)]
     if probe is not None and probe.unreadable and probe.detail:
-        lines.append(f"- Cookie 错误: {_sanitize(probe.detail)}")
+        lines.append(i18n.tr("diag_cookie_error", error=_sanitize(probe.detail)))
     return lines
 
 
@@ -91,8 +92,8 @@ def _save_dir_line(settings: dict) -> str:
     configured = settings.get("save_dirs")
     count = len(configured) if isinstance(configured, dict) else 0
     if count:
-        return f"已按下载方式自定义 {count} 项（路径略）"
-    return "使用默认目录（~/Downloads）"
+        return i18n.tr("diag_save_dirs_custom", count=count)
+    return i18n.tr("diag_save_dirs_default")
 
 
 def build_report(settings: dict = None, probe=None) -> str:
@@ -108,17 +109,18 @@ def build_report(settings: dict = None, probe=None) -> str:
     from . import __version__
 
     lines = [
-        "## 多平台下载器 诊断信息",
-        f"- 应用版本: {__version__}",
-        f"- 系统: {platform.platform()}",
-        f"- Python: {sys.version.split()[0]}",
-        f"- yt-dlp: {_dependency_version('yt_dlp')}",
-        f"- gallery-dl: {_dependency_version('gallery_dl')}",
-        f"- ffmpeg: {_ffmpeg_line()}",
-        f"- 保存目录: {_save_dir_line(settings)}",
+        i18n.tr("diag_header"),
+        i18n.tr("diag_app_version", value=__version__),
+        i18n.tr("diag_os", value=platform.platform()),
+        i18n.tr("diag_python", value=sys.version.split()[0]),
+        i18n.tr("diag_ytdlp", value=_dependency_version("yt_dlp")),
+        i18n.tr("diag_gallerydl", value=_dependency_version("gallery_dl")),
+        i18n.tr("diag_ffmpeg", value=_ffmpeg_line()),
+        i18n.tr("diag_save_dir", value=_save_dir_line(settings)),
     ]
     lines.extend(_cookie_lines(probe))
 
     error = last_error()
-    lines.append(f"- 最近一次错误: {_sanitize(error) if error else '无'}")
+    lines.append(i18n.tr("diag_last_error",
+                         error=_sanitize(error) if error else i18n.tr("diag_none")))
     return "\n".join(lines)

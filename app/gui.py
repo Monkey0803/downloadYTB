@@ -696,7 +696,8 @@ class VideoPanel(TFrame):
 
         self._refresh_title()
 
-        values = [q.display for q in info.qualities] if info.qualities else ["最佳画质"]
+        values = ([q.display for q in info.qualities] if info.qualities
+                  else [i18n.tr("best_quality")])
         self.quality_select.set_values(values)
         self.quality_var.set(values[0])
         self._playlist_items = []      # 换了链接/重新解析，之前的勾选作废
