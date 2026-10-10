@@ -1,4 +1,4 @@
-"""浏览器 Cookie / cookies.txt 的共享状态与失败识别。
+"""浏览器 Cookie / cookies.txt 的共享状态、可用性体检与失败识别。
 
 core.py（视频）与 images.py（图片）都从这里读取 Cookie 配置，界面只需在
 设置变更时调用一次。
@@ -15,9 +15,14 @@ yt-dlp 内部用 ``os.walk()`` 递归查找 Cookie 数据库，``os.walk`` 在�
 
 用户看到这条消息无从判断该怎么办。这里统一识别这类失败，让上层可以
 降级为匿名解析，并给出可操作的提示。
+
+``probe()`` 则把这件事提前：在设置页真实加载一次 Cookie，直接告诉用户
+当前配置到底能不能用，而不是等解析失败后才发现。
 """
 
 import os
+from dataclasses import dataclass
+from typing import Iterator, Optional
 
 # 空 = 不读取浏览器 Cookie；可选 chrome/safari/firefox/edge 等 yt-dlp 支持的值
 _browser = ""
@@ -26,11 +31,40 @@ _cookie_file = ""
 
 # yt-dlp / gallery-dl 在 Cookie 数据库或 cookies.txt 读取失败时的消息特征。
 _COOKIE_LOAD_ERROR_MARKERS = (
-    "cookies database",       # could not find chrome cookies database in ...
-    "cookie database",        # unable to open cookie database / could not copy ...
-    "cookiefile",             # yt-dlp 的 --cookies 选项
+    "cookies database",        # could not find chrome cookies database in ...
+    "cookie database",         # unable to open cookie database / could not copy ...
+    "cookiefile",              # yt-dlp 的 --cookies 选项
     "cookies.txt",
+    "failed to load cookies",  # yt-dlp CookieLoadError 的通用包装消息
 )
+
+# macOS 13+ 的「完全磁盘访问权限」设置页深链。已在本机 macOS 27 实测：
+# 打开后系统设置会直接定位到「完全磁盘访问权限」，窗口标题即为该名称。
+FDA_SETTINGS_URL = (
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"
+    "?Privacy_AllFiles"
+)
+
+PROBE_OFF = "off"                # 未配置任何 Cookie 来源
+PROBE_OK = "ok"                  # 可用
+PROBE_UNREADABLE = "unreadable"  # 配置了但读不到（权限/文件/格式问题）
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """一次 Cookie 可用性体检的结果。"""
+
+    status: str
+    cookie_count: int = 0
+    detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.status == PROBE_OK
+
+    @property
+    def unreadable(self) -> bool:
+        return self.status == PROBE_UNREADABLE
 
 
 def set_browser(browser: str) -> None:
@@ -88,10 +122,93 @@ def gallery_dl_cookies():
     return None
 
 
+def _iter_exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """沿 ``__cause__`` / ``__context__`` 遍历异常链（带环保护）。"""
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _has_marker(message: str) -> bool:
+    low = (message or "").lower()
+    return any(marker in low for marker in _COOKIE_LOAD_ERROR_MARKERS)
+
+
 def is_load_error(exc) -> bool:
-    """判断异常（或错误消息字符串）是否为「Cookie 读取失败」。"""
+    """判断异常（或错误消息字符串）是否为「Cookie 读取失败」。
+
+    需要注意 yt-dlp 的包装层：``YoutubeDL.cookiejar`` 是 cached_property，
+    ``load_cookies()`` 会把底层异常包成 ``CookieLoadError('failed to load
+    cookies')``，再由 ``report_error()`` 以**原始消息**抛成 ``DownloadError``。
+    不同版本抛出的层级不一样，所以既要匹配消息特征，也要顺着异常链回溯，
+    避免包装层把特征信息挡掉。
+    """
     if exc is None:
         return False
-    message = exc if isinstance(exc, str) else str(exc)
-    message = message.lower()
-    return any(marker in message for marker in _COOKIE_LOAD_ERROR_MARKERS)
+    if isinstance(exc, str):
+        return _has_marker(exc)
+    return any(_has_marker(str(item)) for item in _iter_exception_chain(exc))
+
+
+def _load_error_detail(exc: BaseException) -> str:
+    """从异常链里挑出最有信息量的一条消息。"""
+    for item in _iter_exception_chain(exc):
+        text = str(item).strip()
+        if text and _has_marker(text):
+            return text[:300]
+    return str(exc).strip()[:300]
+
+
+class _SilentLogger:
+    """yt-dlp 的 logger 参数槽位。
+
+    ``quiet`` 只影响下载进度输出，``to_stderr()`` 实际上只认 ``params['logger']``，
+    没有 logger 时无论 quiet 与否都会把 "ERROR: ..." 写到 stderr。体检是后台
+    主动探测，不该往终端喷错误，所以这里接住所有日志。
+    """
+
+    def debug(self, message):
+        pass
+
+    def info(self, message):
+        pass
+
+    def warning(self, message):
+        pass
+
+    def error(self, message):
+        pass
+
+
+def probe() -> ProbeResult:
+    """真实加载一次 Cookie，判断当前配置是否可用。
+
+    刻意复用与解析完全相同的加载路径（``YoutubeDL.cookiejar``），因此结论就是
+    「真去解析会不会失败」，而不会因为另写一套路径判断而与实际行为脱节。
+
+    代价是可能触发一次钥匙串访问，也可能耗时到秒级，所以只应在设置页按需调用
+    （放进后台线程），不要挂在应用启动路径上。
+    """
+    options = ytdlp_options()
+    if not options:
+        return ProbeResult(PROBE_OFF)
+
+    try:
+        import yt_dlp
+    except Exception as exc:  # pragma: no cover - 依赖缺失时的兜底
+        return ProbeResult(PROBE_UNREADABLE, detail=str(exc)[:300])
+
+    try:
+        ydl = yt_dlp.YoutubeDL({
+            **options,
+            "quiet": True,
+            "no_warnings": True,
+            "logger": _SilentLogger(),
+        })
+        cookies = list(ydl.cookiejar)  # 触发真实加载
+    except Exception as exc:
+        return ProbeResult(PROBE_UNREADABLE, detail=_load_error_detail(exc))
+    return ProbeResult(PROBE_OK, cookie_count=len(cookies))

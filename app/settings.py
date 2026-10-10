@@ -16,6 +16,7 @@ DEFAULTS = {
     "save_dirs": {},           # 按平台 + 下载类型记录的保存目录
     "browser_cookies": "",    # 空表示不读取浏览器 Cookie；可选 chrome/safari/firefox/edge
     "cookie_file": "",        # 手动导出的 cookies.txt 路径；优先于浏览器 Cookie
+    "window_geometry": "",    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint
 }
 

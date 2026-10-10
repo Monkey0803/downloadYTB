@@ -21,7 +21,8 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import browser_cookies, core, i18n, images, menubar, settings, theme
+from . import (browser_cookies, core, diagnostics, i18n, images, menubar,
+               settings, theme, windowing)
 from .widgets import (
     CheckPill, GlassCard, ImagePicker, LogoSwatch, PillButton, PillSelect,
     RoundEntry, RoundProgress, SegmentedControl, SidebarItem, TFrame, TLabel,
@@ -1302,11 +1303,63 @@ class SettingsPage(TFrame):
             cookie_file_hint = f"{i18n.tr('cookie_file_missing')}\n{cookie_file_hint}"
         self._cookie_file_hint = _pack_wrapped_hint(
             b3, app, cookie_file_hint, bg_role="CARD", pady=(10, 0))
+
+        # —— Cookie 可用性体检结果（打开设置页时后台检测一次）——
+        self._cookie_probe = None
+        self._cookie_probe_token = 0
+        self.cookie_status_label = _pack_wrapped_hint(
+            b3, app, "", bg_role="CARD", pady=(10, 0))
+        self.cookie_fda_hint = _pack_wrapped_hint(
+            b3, app, "", bg_role="CARD", pady=(6, 0))
+        self.cookie_fda_btn = PillButton(
+            b3, i18n.tr("open_system_settings"), command=self._open_fda_settings,
+            font=f.f_btn, width=132, bg_role="CARD")
+        self._fda_button_packed = False
+
         # 说明文字的换行行数随语言/窗口宽度变化，卡片高度按内容实测，
         # 避免英文、日文文案被卡片下沿裁切（固定高度已不够用）。
         b3.bind("<Configure>", lambda _e: self._fit_cookie_card(), add="+")
         self.after_idle(self._fit_cookie_card)
+
+        # —— 快捷键 ——
+        card_keys = GlassCard(self._scroll_body)
+        card_keys.set_height(96)
+        card_keys.pack(fill="x", pady=(0, 12))
+        bk = card_keys.body
+        TLabel(bk, text=i18n.tr("shortcuts"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        _pack_wrapped_hint(bk, app, i18n.tr("shortcuts_hint"),
+                           bg_role="CARD", pady=(8, 0))
+
+        # —— 诊断与反馈 ——
+        card_diag = GlassCard(self._scroll_body)
+        card_diag.set_height(150)
+        card_diag.pack(fill="x", pady=(0, 12))
+        bd = card_diag.body
+        TLabel(bd, text=i18n.tr("diagnostics"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        diag_row = TFrame(bd, bg_role="CARD")
+        diag_row.pack(anchor="w", pady=(10, 0))
+        self.diag_btn = PillButton(diag_row, i18n.tr("copy_diagnostics"),
+                                   command=self._copy_diagnostics,
+                                   font=f.f_btn, width=140, bg_role="CARD")
+        self.diag_btn.pack(side="left")
+        self.diag_status = TLabel(diag_row, text="", font=f.f_small,
+                                  bg_role="CARD", fg_role="TEXT_SUB")
+        self.diag_status.pack(side="left", padx=(10, 0))
+        _pack_wrapped_hint(bd, app, i18n.tr("diagnostics_hint"),
+                           bg_role="CARD", pady=(10, 0))
+
         self._bind_scroll_events()
+
+    def on_shown(self):
+        """设置页变为可见时触发一次 Cookie 体检。
+
+        刻意不放在 __init__：所有页面在启动时就构建好了，若在构造期体检，
+        每次启动都会为「浏览器 Cookie」配置访问一次钥匙串并弹授权框，
+        即使用户这次根本没打算下载。
+        """
+        self.after_idle(self._refresh_cookie_status)
 
     def _fit_cookie_card(self):
         """按内容实际高度调整 Cookie 卡片高度。"""
@@ -1323,6 +1376,103 @@ class SettingsPage(TFrame):
         if needed != getattr(self, "_cookie_card_height", None):
             self._cookie_card_height = needed
             card.set_height(needed)
+
+    # ---------- Cookie 体检 / 诊断 ----------
+
+    def _refresh_cookie_status(self):
+        """在后台真实加载一次 Cookie，把结论显示在设置页。"""
+        if not self.winfo_exists():
+            return
+        self._cookie_probe_token += 1
+        token = self._cookie_probe_token
+        self.cookie_status_label.set_fg_role("TEXT_SUB")
+        self.cookie_status_label.configure(text=i18n.tr("cookie_checking"))
+        self._set_fda_row(False)
+        self._fit_cookie_card()
+
+        def work():
+            try:
+                result = browser_cookies.probe()
+            except Exception as exc:  # 体检本身不应让界面崩掉
+                result = browser_cookies.ProbeResult(
+                    browser_cookies.PROBE_UNREADABLE, detail=str(exc)[:200])
+            self.after(0, lambda: self._apply_cookie_status(token, result))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_cookie_status(self, token, result):
+        # 期间又发起了新的体检，丢弃这次的结果
+        if token != getattr(self, "_cookie_probe_token", 0) or not self.winfo_exists():
+            return
+        self._cookie_probe = result
+
+        if result.status == browser_cookies.PROBE_OK:
+            self.cookie_status_label.set_fg_role("OK")
+            self.cookie_status_label.configure(
+                text=i18n.tr("cookie_ok", n=result.cookie_count))
+            self._set_fda_row(False)
+        elif result.status == browser_cookies.PROBE_OFF:
+            self.cookie_status_label.set_fg_role("TEXT_SUB")
+            self.cookie_status_label.configure(text="")
+            self._set_fda_row(False)
+        else:
+            self.cookie_status_label.set_fg_role("ERROR")
+            self.cookie_status_label.configure(
+                text=i18n.tr("cookie_unreadable_status"))
+            self.cookie_fda_hint.configure(text=i18n.tr("cookie_fda_hint"))
+            # 只有 macOS 才有「完全磁盘访问权限」这一层，其他平台不加按钮
+            self._set_fda_row(sys.platform == "darwin")
+        self._fit_cookie_card()
+
+    def _set_fda_row(self, visible):
+        """显示/隐藏「打开系统设置」按钮与对应说明。"""
+        if visible and not self._fda_button_packed:
+            self.cookie_fda_btn.pack(anchor="w", pady=(8, 0))
+            self._fda_button_packed = True
+        elif not visible and self._fda_button_packed:
+            self.cookie_fda_btn.pack_forget()
+            self._fda_button_packed = False
+            self.cookie_fda_hint.configure(text="")
+
+    def _open_fda_settings(self):
+        """跳转到 macOS「完全磁盘访问权限」设置页。"""
+        if sys.platform != "darwin":
+            return
+        try:
+            subprocess.Popen(["open", browser_cookies.FDA_SETTINGS_URL])
+        except OSError:
+            pass
+
+    def _copy_diagnostics(self):
+        """把诊断报告复制到剪贴板（生成过程可能较慢，放后台线程）。"""
+        self.diag_btn.configure_state("disabled")
+        self.diag_status.set_fg_role("TEXT_SUB")
+        self.diag_status.configure(text=i18n.tr("cookie_checking"))
+
+        def work():
+            try:
+                report = diagnostics.build_report(self.app.settings,
+                                                  probe=self._cookie_probe)
+            except Exception as exc:
+                self.after(0, lambda: self._diagnostics_done(
+                    None, i18n.tr("diagnostics_failed", message=str(exc)[:120])))
+                return
+            self.after(0, lambda: self._diagnostics_done(report, None))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _diagnostics_done(self, report, error):
+        if not self.winfo_exists():
+            return
+        self.diag_btn.configure_state("normal")
+        if error:
+            self.diag_status.set_fg_role("ERROR")
+            self.diag_status.configure(text=error)
+            return
+        self.clipboard_clear()
+        self.clipboard_append(report)
+        self.diag_status.set_fg_role("OK")
+        self.diag_status.configure(text=i18n.tr("diagnostics_copied"))
 
     def _walk_widgets(self, widget=None):
         """遍历设置页控件，确保鼠标停在任意控件上都能滚动。"""
@@ -1412,6 +1562,7 @@ class SettingsPage(TFrame):
         settings.save(self.app.settings)
         core.set_browser_cookies(value)
         images.set_browser_cookies(value)
+        self._refresh_cookie_status()  # 设置一变立刻重新体检
 
     def _apply_cookie_file(self, path):
         """写入 cookies.txt 设置并同步给两个引擎。"""
@@ -1420,6 +1571,7 @@ class SettingsPage(TFrame):
         core.set_cookie_file(path)
         images.set_cookie_file(path)
         self.cookie_file_var.set(path or i18n.tr("cookie_file_none"))
+        self._refresh_cookie_status()
 
     def _choose_cookie_file(self):
         path = filedialog.askopenfilename(
@@ -1803,6 +1955,12 @@ class App(tk.Tk):
         for k, item in self.nav_items.items():
             item.set_active(k == key)
         self.current_page = key
+        # 页面首次可见时才做昂贵/有副作用的准备（例如设置页的 Cookie 体检，
+        # 会访问钥匙串，放在启动路径上会平白弹出授权框）。
+        shown = self.pages.get(key)
+        on_shown = getattr(shown, "on_shown", None)
+        if callable(on_shown):
+            on_shown()
 
     # ---------- 主题 ----------
 

@@ -241,6 +241,59 @@ def test_image_post_warning_is_shown_in_status_bar():
     panel._set_status.assert_called_once_with(post.warning)
 
 
+def test_load_error_follows_exception_chain():
+    """包装层不能把特征信息挡掉。
+
+    yt-dlp 的 load_cookies() 会把底层异常包成 CookieLoadError('failed to load
+    cookies')，不同版本抛出的层级不一样，所以识别必须顺着异常链回溯。
+    """
+    opaque = RuntimeError("opaque wrapper")
+    opaque.__cause__ = FileNotFoundError(
+        'could not find chrome cookies database in "/tmp/x"')
+    # 外层消息本身不含任何特征，只有回溯异常链才能识别
+    assert not browser_cookies.is_load_error(str(opaque))
+    assert browser_cookies.is_load_error(opaque)
+    assert "cookies database" in browser_cookies._load_error_detail(opaque)
+
+    # yt-dlp 的通用包装消息本身也算特征
+    assert browser_cookies.is_load_error(RuntimeError("failed to load cookies"))
+
+    # 自引用环不应导致死循环
+    loop = RuntimeError("opaque loop")
+    loop.__context__ = loop
+    assert not browser_cookies.is_load_error(loop)
+
+
+def test_probe_reports_off_ok_and_unreadable():
+    """体检结论要与真实加载结果一致。"""
+    _reset_cookie_state()
+    try:
+        assert browser_cookies.probe().status == browser_cookies.PROBE_OFF
+
+        # 未安装/不存在的浏览器名：yt-dlp 必然加载失败，且不依赖本机环境
+        _use_browser("definitely-not-a-browser")
+        result = browser_cookies.probe()
+        assert result.status == browser_cookies.PROBE_UNREADABLE
+        assert result.unreadable and not result.ok
+        assert result.detail  # 保留原始错误，便于诊断
+
+        # 合法 cookies.txt：可读且能数出条数
+        handle = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+        handle.write(b"# Netscape HTTP Cookie File\n"
+                     b".example.com\tTRUE\t/\tFALSE\t0\tNAME\tVALUE\n")
+        handle.close()
+        try:
+            _use_browser("")
+            _use_cookie_file(handle.name)
+            result = browser_cookies.probe()
+            assert result.status == browser_cookies.PROBE_OK
+            assert result.cookie_count == 1
+        finally:
+            os.unlink(handle.name)
+    finally:
+        _reset_cookie_state()
+
+
 if __name__ == "__main__":
     test_load_error_is_recognised_and_not_over_reported()
     test_cookie_file_takes_priority_over_browser()
@@ -249,4 +302,6 @@ if __name__ == "__main__":
     test_video_probe_falls_back_to_anonymous_on_cookie_failure()
     test_wrap_error_marks_cookie_failure_separately()
     test_image_post_warning_is_shown_in_status_bar()
+    test_load_error_follows_exception_chain()
+    test_probe_reports_off_ok_and_unreadable()
     print("PASS: 浏览器 Cookie 读取失败的识别、降级与提示")
