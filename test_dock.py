@@ -1,4 +1,4 @@
-"""Dock 进度/完成提示的测试。
+"""Dock / 任务栏进度提示的测试：macOS 后端与界面接线。
 
 单测用假 AppKit 覆盖「应用不在前台时弹跳」这类真实环境不好构造的分支；
 另外在这里回读一次真实 AppKit 的行为（见 __main__ 尾部的说明），确保假件
@@ -10,7 +10,7 @@ import sys
 import types
 from unittest.mock import Mock
 
-from app import dock, gui, images, settings as settings_mod
+from app import dock, gui, images, settings as settings_mod, taskbar
 
 INFORMATIONAL = 10
 
@@ -115,7 +115,7 @@ def test_non_darwin_is_a_noop():
     fake_app, restore = _install_fake_appkit()
     original_platform = sys.platform
     try:
-        dock.sys.platform = "linux"
+        taskbar.sys.platform = "linux"
         assert dock.enabled_platform() is False
         dock.set_progress(50)
         dock.set_done()
@@ -123,7 +123,7 @@ def test_non_darwin_is_a_noop():
         assert fake_app.tile.badge is None      # 一次都没碰过
         assert fake_app.attention == []
     finally:
-        dock.sys.platform = original_platform
+        taskbar.sys.platform = original_platform
         restore()
 
 
@@ -146,16 +146,16 @@ def test_app_gate_respects_setting_and_platform():
     try:
         on = _fake_app_with_gate(True)
         off = _fake_app_with_gate(False)
-        if dock.enabled_platform():
+        if taskbar.enabled_platform():
             assert on.dock_status_enabled() is True
         # 设置里关掉 → 即使 macOS 也不写角标
         assert off.dock_status_enabled() is False
         # 非 macOS → 即使设置为开也一律关闭
-        dock.sys.platform = "linux"
+        taskbar.sys.platform = "linux"
         assert on.dock_status_enabled() is False
         assert off.dock_status_enabled() is False
     finally:
-        dock.sys.platform = original_platform
+        taskbar.sys.platform = original_platform
 
 
 def _fake_app_with_gate(dock_on=True):
@@ -170,26 +170,27 @@ def _fake_app_with_gate(dock_on=True):
 def test_panels_call_dock_on_progress_and_completion():
     """界面接线：进度写角标，完成提示，取消/失败清除。"""
     calls = []
-    original_progress = gui.dock.set_progress
-    original_done = gui.dock.set_done
-    original_clear = gui.dock.clear
-    gui.dock.set_progress = lambda p: calls.append(("progress", p))
-    gui.dock.set_done = lambda: calls.append(("done", None))
-    gui.dock.clear = lambda: calls.append(("clear", None))
+    original_progress = gui.taskbar.set_progress
+    original_done = gui.taskbar.set_done
+    original_clear = gui.taskbar.clear
+    # 界面层会带 window=app（Windows 后端需要窗口句柄）
+    gui.taskbar.set_progress = lambda p, **kw: calls.append(("progress", p))
+    gui.taskbar.set_done = lambda **kw: calls.append(("done", None))
+    gui.taskbar.clear = lambda **kw: calls.append(("clear", None))
     try:
         app = _fake_app_with_gate(True)
 
-        gui._dock_progress(app, 33)
-        gui._dock_done(app)
-        gui._dock_clear(app)
+        gui._taskbar_progress(app, 33)
+        gui._taskbar_done(app)
+        gui._taskbar_clear(app)
         assert calls == [("progress", 33), ("done", None), ("clear", None)]
 
         # 用户在设置里关闭后，一律不再触碰 Dock
         calls.clear()
         app = _fake_app_with_gate(False)
-        gui._dock_progress(app, 33)
-        gui._dock_done(app)
-        gui._dock_clear(app)
+        gui._taskbar_progress(app, 33)
+        gui._taskbar_done(app)
+        gui._taskbar_clear(app)
         assert calls == []
 
         # 图片面板完成路径确实会触发完成提示
@@ -207,9 +208,9 @@ def test_panels_call_dock_on_progress_and_completion():
         gui.ImagePanel._download_failed(panel, "boom")
         assert calls == [("clear", None), ("clear", None)]
     finally:
-        gui.dock.set_progress = original_progress
-        gui.dock.set_done = original_done
-        gui.dock.clear = original_clear
+        gui.taskbar.set_progress = original_progress
+        gui.taskbar.set_done = original_done
+        gui.taskbar.clear = original_clear
 
 
 def test_dock_toggle_handler_persists_and_clears():

@@ -21,8 +21,8 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import (browser_cookies, core, diagnostics, dock, i18n, images, menubar,
-               platforms, settings, theme, windowing)
+from . import (browser_cookies, core, diagnostics, i18n, images, menubar,
+               platforms, settings, taskbar, theme, windowing)
 from .widgets import (
     CheckPill, GlassCard, ImagePicker, LogoSwatch, PillButton, PillSelect,
     RoundEntry, RoundProgress, SegmentedControl, SidebarItem, TFrame, TLabel,
@@ -517,13 +517,13 @@ class VideoPanel(TFrame):
         self.probe_btn.configure_state("normal")
         self.download_btn.configure_state("normal")
 
-        suffix = (f"  ·  {info.uploader}" if info.uploader else "") + f"  ·  {info.duration_text}"
+        text, suffix = self._title_text(info)
         max_px = max(200, self.title_label.winfo_width() - 8)
         f = self.app.f_small
-        title = info.title
+        title = text
         while title and f.measure(title + "…" + suffix) > max_px:
             title = title[:-1]
-        if title != info.title:
+        if title != text:
             title += "…"
         self.title_label.set_fg_role("TEXT")
         self.title_label.configure(text=f"{title}{suffix}")
@@ -678,26 +678,55 @@ class VideoPanel(TFrame):
         self.probe_btn.configure_state("disabled")
         self._set_status(i18n.tr("resuming" if resume else "starting"))
 
+        # 播放列表当前条目位置；由 entry_progress 更新，供进度文案复用
+        self._playlist_pos = None
+
+        def position_prefix():
+            if not self._playlist_pos:
+                return ""
+            index, total, _title = self._playlist_pos
+            key = "playlist_prefix" if total else "playlist_prefix_unknown"
+            return i18n.tr(key, index=index, total=total) + "  ·  "
+
+        def on_entry(index, total, title):
+            self._playlist_pos = (index, total, title)
+
+            def update():
+                if cancel_event.is_set() or pause_event.is_set():
+                    return
+                if total:
+                    self._set_status(i18n.tr("playlist_progress", index=index,
+                                             total=total, title=title))
+                else:
+                    self._set_status(i18n.tr("playlist_progress_unknown", index=index,
+                                             title=title))
+            self.after(0, update)
+
         def on_progress(percent, speed_text, eta_text, status):
             def update():
                 if cancel_event.is_set() or pause_event.is_set():
                     return
                 if status == "merging":
-                    self.progress.set(100)
-                    self._set_status(i18n.tr("merging"))
+                    # 播放列表里每个条目都会合并，进度条保持整批百分比
+                    if self._playlist_pos is None:
+                        self.progress.set(100)
+                    self._set_status(position_prefix() + i18n.tr("merging"))
                 else:
                     if percent is not None:
                         self._last_percent = percent
                         self.progress.set(percent)
-                        _dock_progress(self.app, percent)
-                        self._set_status(i18n.tr(
+                        _taskbar_progress(self.app, percent)
+                        self._set_status(position_prefix() + i18n.tr(
                             "downloading_percent", percent=percent,
                             speed=speed_text, eta=eta_text))
                     else:
-                        self._set_status(i18n.tr("downloading", speed=speed_text))
+                        self._set_status(position_prefix()
+                                         + i18n.tr("downloading", speed=speed_text))
             self.after(0, update)
 
         def work():
+            path = None
+            paths = None
             try:
                 if p["audio_only"]:
                     path = core.download_audio(p["url"], save_dir=p["save_dir"],
@@ -754,22 +783,29 @@ class VideoPanel(TFrame):
     def _download_cancelled(self):
         self._reset_after_download()
         self.progress.set(0)
-        _dock_clear(self.app)
+        _taskbar_clear(self.app)
         self._set_status(i18n.tr("cancelled_cleaned"))
 
     def _download_failed(self, msg):
         self._reset_after_download()
         self.progress.set(0)
-        _dock_clear(self.app)
+        _taskbar_clear(self.app)
         self._set_status(msg, error=True)
 
-    def _download_done(self, path):
+    def _download_done(self, result):
         self._reset_after_download()
-        self._last_file = path
+        paths = [p for p in (result if isinstance(result, (list, tuple)) else [result]) if p]
+        self._last_file = paths[0] if paths else None
         self.open_btn.configure_state("normal")
         self.progress.set(0)
-        _dock_done(self.app)
-        self._set_status(i18n.tr("download_complete"), ok=True, filename=os.path.basename(path))
+        _taskbar_done(self.app)
+        if len(paths) > 1:
+            folder = os.path.basename(os.path.dirname(paths[0]))
+            self._set_status(i18n.tr("playlist_complete", n=len(paths), folder=folder),
+                             ok=True)
+        else:
+            self._set_status(i18n.tr("download_complete"), ok=True,
+                             filename=os.path.basename(self._last_file or ""))
 
     def on_open_folder(self):
         open_in_file_manager(self._last_file)
@@ -1117,7 +1153,7 @@ class ImagePanel(TFrame):
                 if cancel_event.is_set():
                     return
                 self.progress.set(percent)
-                _dock_progress(self.app, percent)
+                _taskbar_progress(self.app, percent)
                 self._set_status(text)
             self.after(0, update)
 
@@ -1157,14 +1193,14 @@ class ImagePanel(TFrame):
         done = len(self._last_paths)
         self._reset_after_download()
         self.progress.set(0)
-        _dock_clear(self.app)
+        _taskbar_clear(self.app)
         suffix = i18n.tr("completed_images_kept", done=done) if done else ""
         self._set_status(i18n.tr("cancelled_images") + suffix)
 
     def _download_failed(self, msg):
         self._reset_after_download()
         self.progress.set(0)
-        _dock_clear(self.app)
+        _taskbar_clear(self.app)
         self._set_status(msg, error=True)
 
     def _download_done(self, result):
@@ -1174,7 +1210,7 @@ class ImagePanel(TFrame):
         self._reset_after_download()
         self.progress.set(0)
         self.open_btn.configure_state("normal")
-        _dock_done(self.app)
+        _taskbar_done(self.app)
         if not result.paths:
             # 全部已存在：报「完成 0 张」会让人以为失败了
             self._set_status(
@@ -1871,7 +1907,7 @@ class SettingsPage(TFrame):
         self.app.settings["dock_status"] = bool(self.dock_var.get())
         settings.save(self.app.settings)
         if not self.dock_var.get():
-            dock.clear()  # 关掉后立刻清掉残留角标
+            taskbar.clear(window=self.app)  # 关掉后立刻清掉残留角标
 
     def _choose_cookie_file(self):
         path = filedialog.askopenfilename(
@@ -1896,22 +1932,22 @@ class SettingsPage(TFrame):
 # ====================================================================
 
 
-def _dock_progress(app, percent):
-    """下载进度写入 Dock 角标（用户在设置里关闭或非 macOS 时跳过）。"""
+def _taskbar_progress(app, percent):
+    """下载进度写入 Dock 角标 / Windows 任务栏进度（用户开关打开时）。"""
     if app.dock_status_enabled():
-        dock.set_progress(percent)
+        taskbar.set_progress(percent, window=app)
 
 
-def _dock_done(app):
-    """完成提示：角标 ✓ + 必要时弹跳 Dock。"""
+def _taskbar_done(app):
+    """完成提示：角标 ✓ / 弹跳，或在任务栏闪烁提示。"""
     if app.dock_status_enabled():
-        dock.set_done()
+        taskbar.set_done(window=app)
 
 
-def _dock_clear(app):
-    """清除 Dock 角标。"""
+def _taskbar_clear(app):
+    """清除 Dock 角标 / 任务栏进度。"""
     if app.dock_status_enabled():
-        dock.clear()
+        taskbar.clear(window=app)
 
 
 def _check_pill_width(font, text, extra=44):
@@ -2037,7 +2073,8 @@ class App(tk.Tk):
 
     def dock_status_enabled(self):
         """是否把进度/完成状态写到 Dock 角标（用户可关闭，且仅 macOS 有效）。"""
-        return bool(self.settings.get("dock_status", True)) and dock.enabled_platform()
+        return (bool(self.settings.get("dock_status", True))
+                and taskbar.enabled_platform())
 
     def default_save_dir(self, key=None):
         """返回指定下载方式的目录，未单独设置时回退到全局默认目录。"""
@@ -2512,7 +2549,7 @@ class App(tk.Tk):
     def _on_focus_in(self, event):
         if event.widget is self:
             # 回到应用就该清掉 Dock 上的进度/完成角标，避免长期残留
-            _dock_clear(self)
+            _taskbar_clear(self)
             self._check_clipboard()
 
     def _check_clipboard(self):
