@@ -260,7 +260,7 @@ bash build/build_linux.sh
 ## 贡献流程
 
 1. Fork 仓库或从 main 创建功能分支。
-2. 一个提交只解决一个主题。提交信息会被全局 commit-msg 钩子校验：标题必须写成 `<type>(<scope>): <描述>`（type 取 feat / fix / refactor / chore / docs / test / perf / build / ci / revert，本仓库的应用改动使用 scope `pc`），标题和正文都要含中文，标题后空一行，正文每条以 `- ` 开头且至少两条。
+2. 一个提交只解决一个主题。提交信息会被全局 commit-msg 钩子校验：标题必须写成 `<type>(<scope>): <描述>`（type 取 feat / fix / refactor / chore / docs / test / perf / build / ci / revert，本仓库统一使用 scope `repo`），标题和正文都要含中文，标题后空一行，正文每条以 `- ` 开头且至少两条。
 3. 先运行静态检查，再运行与改动相关的 GUI/联网测试。
 4. Pull Request 中说明：问题、实现方案、验证命令、未验证项和平台差异。
 5. 不要提交 .venv、dist、build/work、screenshots、test_downloads、Cookie、账号信息或本地设置。
@@ -273,7 +273,7 @@ git diff --check
 PYTHONPYCACHEPREFIX=/tmp/downloadytb-pycache .venv/bin/python -m py_compile app/*.py main.py
 git status --short
 git commit -F - <<'MSG'
-fix(pc): 取消图片下载时清理残留的临时文件
+fix(repo): 取消图片下载时清理残留的临时文件
 
 - 取消后删除 .part 等临时文件并保留已完成的文件
 - 补充取消流程的回归测试

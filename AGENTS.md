@@ -55,8 +55,10 @@ format it enforces:
 
 - **Subject**: `<type>(<scope>): <description>`, where `<type>` is one of
   `feat|fix|refactor|chore|docs|test|perf|build|ci|revert` and `<scope>` matches
-  `[a-z0-9._-]+`. Use the scope `pc` for application changes here (the existing
-  `fix(pc):` commits follow this). A subject without a scope is rejected.
+  `[a-z0-9._-]+`. Use the scope `repo` here: the companion `prepare-commit-msg` hook
+  derives it for this repository, because none of its `unity`/`ios`/`android` path
+  patterns ever match (`refactor(repo):` for code changes, `docs(repo):` for
+  Markdown-only ones). A subject without a scope is rejected.
 - **The subject must contain Chinese.** English-only subjects are rejected, so the
   English-only examples in older revisions of this file no longer apply.
 - **Line 2 must be empty**, followed by the body.
@@ -67,7 +69,7 @@ format it enforces:
 A message that passes the hook:
 
 ~~~text
-fix(pc): 修复浏览器 Cookie 不可读时微博图片解析整体失败
+fix(repo): 修复浏览器 Cookie 不可读时微博图片解析整体失败
 
 - 新增 browser_cookies 模块统一持有 Cookie 配置并识别读取失败
 - 打包 App 未获完全磁盘访问权限时降级为匿名解析而非直接报错
@@ -75,8 +77,8 @@ fix(pc): 修复浏览器 Cookie 不可读时微博图片解析整体失败
 ~~~
 
 Always pass an explicit message with `-m`/`-F`. Running a bare `git commit` lets the
-companion `prepare-commit-msg` hook synthesize a generic skeleton, which is compliant but
-says nothing useful about the change.
+companion `prepare-commit-msg` hook synthesize a generic `refactor(repo):` /
+`docs(repo):` skeleton, which is compliant but says nothing useful about the change.
 
 Keep one logical change per commit. Pull requests should describe the problem, implementation, verification commands, unverified platform/network cases, and include screenshots for visible UI changes. Before submitting, inspect `git diff --cached --stat` and `git diff --cached --check`.
 
