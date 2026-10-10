@@ -26,7 +26,7 @@ from . import (browser_cookies, core, diagnostics, i18n, images, menubar,
 from .widgets import (
     CheckPill, GlassCard, ImagePicker, LogoSwatch, PillButton, PillSelect,
     RoundEntry, RoundProgress, SegmentedControl, SidebarItem, TFrame, TLabel,
-    apply_theme_tree, ellipsize, ellipsize_filename,
+    apply_theme_tree, ellipsize, ellipsize_filename, hand_cursor,
 )
 
 _NATIVE_SCROLL_AVAILABLE = False
@@ -459,6 +459,8 @@ class VideoPanel(TFrame):
             shown = text + ellipsize_filename(filename, f, avail)
         else:
             shown = ellipsize(text, f, max_px)
+        # 截断时给出可点击的提示（手型光标），否则用户不知道能点
+        self.status_label.configure(cursor=hand_cursor() if shown != text else "")
         if shown != self.status_label.cget("text"):
             self.status_label.configure(text=shown)
 
@@ -1845,6 +1847,20 @@ class SettingsPage(TFrame):
         TLabel(bdk, text=i18n.tr("download_feedback"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
 
+        clip_row = TFrame(bdk, bg_role="CARD")
+        clip_row.pack(fill="x", pady=(10, 0))
+        TLabel(clip_row, text=i18n.tr("clipboard_setting"), font=f.f_body,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+        self.clipboard_var = tk.StringVar(
+            value=self._clipboard_action_label(app.settings.get("clipboard_action")))
+        self.clipboard_var.trace_add("write", lambda *a: self._on_clipboard_action_change())
+        PillSelect(clip_row, self.clipboard_var,
+                   values=[self._clipboard_action_label(v)
+                           for v in ("suggest", "auto", "off")],
+                   font=f.f_btn, width=170).pack(side="left")
+        _pack_wrapped_hint(bdk, app, i18n.tr("clipboard_hint"),
+                           bg_role="CARD", pady=(6, 0))
+
         self.skip_var = tk.BooleanVar(
             value=bool(app.settings.get("skip_existing_images", True)))
         self.skip_var.trace_add("write", lambda *a: self._on_skip_existing_change())
@@ -2170,9 +2186,38 @@ class SettingsPage(TFrame):
         settings.save(self.app.settings)
         browser_cookies.set_platform_overrides(mapping)
 
+    def _clipboard_action_label(self, value):
+        return i18n.tr({
+            "auto": "clipboard_auto",
+            "off": "clipboard_off",
+        }.get(str(value or "").strip().lower(), "clipboard_suggest"))
+
+    def _clipboard_action_value(self, label):
+        for value in ("suggest", "auto", "off"):
+            if self._clipboard_action_label(value) == label:
+                return value
+        return "suggest"
+
+    def _on_clipboard_action_change(self):
+        value = self._clipboard_action_value(self.clipboard_var.get())
+        self.app.settings["clipboard_action"] = value
+        settings.save(self.app.settings)
+        if value != "suggest":
+            # 关掉/改成自动后，残留的建议条要收起来
+            self.app._hide_clipboard_suggestion()
+
     def _on_skip_existing_change(self):
         self.app.settings["skip_existing_images"] = bool(self.skip_var.get())
         settings.save(self.app.settings)
+
+    def _open_subtitle_picker(self):
+        """勾选常用语言；列表外的自定义代码会原样保留。"""
+        picker = SubtitleLanguagePicker(self, self.app, self.subtitle_langs_var.get())
+        chosen = picker.show()
+        if chosen is None:
+            return
+        self.subtitle_langs_var.set(chosen)
+        self._fit_card("subtitles")
 
     def _on_subtitle_langs_change(self):
         """字幕语言：留空时回落到默认语言，避免 yt-dlp 的 "all" 拉上百种自动字幕。"""
@@ -2561,6 +2606,21 @@ class App(tk.Tk):
         self.content = TFrame(self, bg_role="BG")
         self.content.pack(side="left", fill="both", expand=True)
 
+        # 剪贴板建议条：默认隐藏，检测到链接时才插到页面区域上方。
+        # 之所以放在全局而不是各页面里：检测到的链接可能属于任何平台，而且
+        # 切换页面本身就是要避免的打扰。
+        self._clipboard_suggestion = ""
+        self.clip_bar = TFrame(self.content, bg_role="BG")
+        self.clip_label = TLabel(self.clip_bar, text="", anchor="w",
+                                 font=self.f_small, bg_role="BG", fg_role="TEXT")
+        self.clip_label.pack(side="left", fill="x", expand=True)
+        PillButton(self.clip_bar, i18n.tr("clipboard_fill"),
+                   command=self._accept_clipboard_suggestion, primary=True,
+                   font=self.f_btn, width=124, bg_role="BG").pack(side="right")
+        PillButton(self.clip_bar, i18n.tr("clipboard_ignore"),
+                   command=self._dismiss_clipboard_suggestion,
+                   font=self.f_btn, width=88, bg_role="BG").pack(side="right", padx=(0, 8))
+
         self.page_holder = TFrame(self.content, bg_role="BG")
         self.page_holder.pack(fill="both", expand=True, padx=26, pady=(20, 16))
 
@@ -2829,6 +2889,43 @@ class App(tk.Tk):
             _taskbar_clear(self)
             self._check_clipboard()
 
+    # ---------- 剪贴板 ----------
+
+    def clipboard_action(self) -> str:
+        """剪贴板处理方式：suggest（默认）/ auto / off。
+
+        默认改成「先提示」：旧行为会在每次窗口获得焦点时切页、覆盖输入框并直接
+        联网解析，用户无法拒绝也无法关闭。
+        """
+        action = str(self.settings.get("clipboard_action", "suggest") or "").strip().lower()
+        return action if action in ("suggest", "auto", "off") else "suggest"
+
+    def _show_clipboard_suggestion(self, url):
+        self._clipboard_suggestion = url
+        self.clip_label.configure(
+            text=i18n.tr("clipboard_found", url=ellipsize(url, self.f_small, 460)))
+        if not self.clip_bar.winfo_manager():
+            # before=self.page_holder：page_holder 先被 pack 过，不指定就会排到它下面
+            self.clip_bar.pack(side="top", fill="x", padx=26, pady=(14, 0),
+                               before=self.page_holder)
+
+    def _hide_clipboard_suggestion(self):
+        self._clipboard_suggestion = ""
+        self.clip_bar.pack_forget()
+
+    def _accept_clipboard_suggestion(self):
+        url = self._clipboard_suggestion
+        self._hide_clipboard_suggestion()
+        if not url:
+            return
+        platform = detect_platform(url)
+        if platform in self.pages:
+            self.show_page(platform)
+            self.pages[platform].handle_url(url)
+
+    def _dismiss_clipboard_suggestion(self):
+        self._hide_clipboard_suggestion()
+
     def _check_clipboard(self):
         try:
             text = self.clipboard_get()
@@ -2837,14 +2934,21 @@ class App(tk.Tk):
         if text == self._last_clipboard:
             return
         self._last_clipboard = text
+        action = self.clipboard_action()
+        if action == "off":
+            return
         url = extract_supported_url(text)
         if not url:
             return
         platform = detect_platform(url)
         if platform not in self.pages:
             return
-        self.show_page(platform)
-        self.pages[platform].handle_url(url)
+        if action == "auto":
+            # 保留旧行为，但改成需要用户显式选择
+            self.show_page(platform)
+            self.pages[platform].handle_url(url)
+            return
+        self._show_clipboard_suggestion(url)
 
 
 def run():
