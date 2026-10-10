@@ -619,6 +619,8 @@ class VideoPanel(TFrame):
                                    font=f.f_sub, bg_role="BG", fg_role="TEXT_SUB")
         self.status_label.pack(side="left", fill="x", expand=True)
         self.status_label.bind("<Configure>", lambda e: self._refresh_status_text())
+        # 状态栏可点开看完整内容（长错误会被截断）
+        self.status_label.bind("<Button-1>", lambda e: self._show_status_detail())
 
     # ---------- 状态栏 ----------
 
@@ -628,6 +630,15 @@ class VideoPanel(TFrame):
             diagnostics.record_error(text)  # 供「复制诊断信息」引用
         self.status_label.set_fg_role("ERROR" if error else ("OK" if ok else "TEXT_SUB"))
         self._refresh_status_text()
+
+    def _status_detail_body(self):
+        """详情弹窗的正文：状态文字 + 文件名（若有）。"""
+        text, filename = self._status_full
+        return text + (f"\n\n{filename}" if filename else "")
+
+    def _show_status_detail(self):
+        TextDetailDialog(self, self.app, i18n.tr("status_detail"),
+                         self._status_detail_body()).show()
 
     def _refresh_status_text(self):
         text, filename = self._status_full
@@ -1391,6 +1402,8 @@ class ImagePanel(TFrame):
                                    font=f.f_sub, bg_role="BG", fg_role="TEXT_SUB")
         self.status_label.pack(side="left", fill="x", expand=True)
         self.status_label.bind("<Configure>", lambda e: self._refresh_status_text())
+        # 状态栏可点开看完整内容（长错误会被截断）
+        self.status_label.bind("<Button-1>", lambda e: self._show_status_detail())
 
     def _on_panel_resize(self, _event):
         available = self.winfo_height() - self.RESOURCE_CARD_RESERVED_HEIGHT
@@ -1412,10 +1425,19 @@ class ImagePanel(TFrame):
         self.status_label.set_fg_role("ERROR" if error else ("OK" if ok else "TEXT_SUB"))
         self._refresh_status_text()
 
+    def _status_detail_body(self):
+        return str(self._status_full or "")
+
+    def _show_status_detail(self):
+        TextDetailDialog(self, self.app, i18n.tr("status_detail"),
+                         self._status_detail_body()).show()
+
     def _refresh_status_text(self):
         max_px = self.status_label.winfo_width() - 4
         shown = (self._status_full if max_px <= 8
                  else ellipsize(self._status_full, self.app.f_sub, max_px))
+        self.status_label.configure(
+            cursor=hand_cursor() if shown != self._status_full else "")
         if shown != self.status_label.cget("text"):
             self.status_label.configure(text=shown)
 
