@@ -213,11 +213,12 @@ class VideoPanel(TFrame):
         opt_row.pack(fill="x", pady=(10, 0))
         self.mode_var = tk.StringVar(value="video")
         if self._show_audio:
+            mode_options = [(i18n.tr("video_with_audio"), "video"),
+                            (i18n.tr("audio_only"), "audio")]
             self.mode_seg = SegmentedControl(
-                opt_row, [(i18n.tr("video_with_audio"), "video"),
-                          (i18n.tr("audio_only"), "audio")],
-                self.mode_var, command=self._on_mode_change, font=f.f_btn, width=250,
-            )
+                opt_row, mode_options, self.mode_var, command=self._on_mode_change,
+                font=f.f_btn,
+                width=_segmented_width(f.f_btn, [text for text, _ in mode_options]))
             self.mode_seg.pack(side="left")
             self.quality_label = TLabel(
                 opt_row, text=i18n.tr("quality"), font=f.f_body, bg_role="CARD",
@@ -841,8 +842,10 @@ class ImagePanel(TFrame):
                                   fg_role="TEXT_SUB")
         self.count_label.pack(side="right")
         self.all_var = tk.BooleanVar(value=False)
-        self.all_check = CheckPill(head, i18n.tr("select_all"), self.all_var,
-                                   command=self._on_all_toggle, font=f.f_btn, width=70)
+        self.all_check = CheckPill(
+            head, i18n.tr("select_all"), self.all_var,
+            command=self._on_all_toggle, font=f.f_btn,
+            width=_check_pill_width(f.f_btn, i18n.tr("select_all")))
         self.all_check.pack(side="right", padx=(0, 12))
 
         self.post_label = TLabel(b2, text=i18n.tr("select_images_hint"), anchor="w",
@@ -1251,11 +1254,12 @@ class MediaPlatformPage(TFrame):
         self.kind_var = tk.StringVar(value="video" if show_kind_switch else "image")
         self.kind_seg = None
         if show_kind_switch:
+            kind_options = [(i18n.tr("video_segment"), "video"),
+                            (i18n.tr("image_segment"), "image")]
             self.kind_seg = SegmentedControl(
-                head_row, [(i18n.tr("video_segment"), "video"),
-                           (i18n.tr("image_segment"), "image")], self.kind_var,
-                command=self._on_kind_change, font=app.f_btn, width=176,
-                bg_role="BG")
+                head_row, kind_options, self.kind_var,
+                command=self._on_kind_change, font=app.f_btn, bg_role="BG",
+                width=_segmented_width(app.f_btn, [t for t, _ in kind_options]))
             self.kind_seg.pack(side="right", pady=(6, 0))
 
         self.hint_label = None
@@ -1346,11 +1350,12 @@ class SettingsPage(TFrame):
         row1 = TFrame(b1, bg_role="CARD")
         row1.pack(fill="x", pady=(10, 0))
         self.theme_var = tk.StringVar(value=theme.mode())
+        theme_options = [(i18n.tr("system_theme"), "system"),
+                         (i18n.tr("light_theme"), "light"),
+                         (i18n.tr("dark_theme"), "dark")]
         self.theme_seg = SegmentedControl(
-            row1, [(i18n.tr("system_theme"), "system"),
-                   (i18n.tr("light_theme"), "light"),
-                   (i18n.tr("dark_theme"), "dark")], self.theme_var,
-            command=self._on_theme_change, font=f.f_btn, width=300)
+            row1, theme_options, self.theme_var, command=self._on_theme_change,
+            font=f.f_btn, width=_segmented_width(f.f_btn, [t for t, _ in theme_options]))
         self.theme_seg.pack(side="left")
         self.theme_hint = TLabel(row1, text="", font=f.f_small, bg_role="CARD",
                                  fg_role="TEXT_SUB")
@@ -1907,6 +1912,33 @@ def _dock_clear(app):
     """清除 Dock 角标。"""
     if app.dock_status_enabled():
         dock.clear()
+
+
+def _check_pill_width(font, text, extra=44):
+    """CheckPill 的文字是 Canvas 自绘的，宽度不够会被直接裁掉。
+
+    英文（以及其他语言）文案常比中文长一半以上，所以按实际字体测量，
+    而不是写死像素——写死过一次 340，英文直接被截成
+    "Skip images that were already downloade"。
+    """
+    try:
+        measured = font.measure(text)
+    except Exception:
+        return 300
+    return max(120, measured + extra)  # extra = 复选框 18px + 左右内边距
+
+
+def _segmented_width(font, labels, margin=18):
+    """SegmentedControl 把总宽平分给每段，必须保证最长的一段也放得下。
+
+    写死宽度在英文下会截断（"Video (with audio)" 曾显示成 "/ideo (with audio)"）。
+    """
+    labels = list(labels)
+    try:
+        widest = max(font.measure(label) for label in labels)
+    except Exception:
+        return 260
+    return int(widest + margin) * len(labels) + 6
 
 
 def _active_panel(page):
