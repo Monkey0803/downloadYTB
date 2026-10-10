@@ -64,6 +64,22 @@ class ImageCancelled(Exception):
 
 
 @dataclass
+class DownloadResult:
+    """一批图片的下载结果。
+
+    分开记录「本次下载」与「已存在被跳过」，界面才能如实汇报，
+    也让「全部已存在」这种情况不会退化成「完成 0 张」。
+    """
+
+    paths: List[str] = field(default_factory=list)
+    skipped: List[str] = field(default_factory=list)
+
+    @property
+    def saved_any(self) -> bool:
+        return bool(self.paths)
+
+
+@dataclass
 class ImageItem:
     """帖子中的一个可下载媒体项。"""
 
@@ -666,8 +682,13 @@ def download_images(
     save_dir: str = DEFAULT_SAVE_DIR,
     progress: Optional[ImageProgress] = None,
     cancel_event: Optional[threading.Event] = None,
-) -> List[str]:
-    """逐张下载图片，返回保存路径列表。
+    skip_existing: bool = True,
+) -> DownloadResult:
+    """逐张下载图片，返回本次下载与跳过的路径。
+
+    skip_existing 为真时，目标文件已存在就跳过（与视频走 yt-dlp 默认
+    「已下载则跳过」的行为一致），避免同一帖子反复下载出一堆 " (1)" 副本；
+    为假时沿用旧的防覆盖策略，重名自动加序号。
 
     cancel_event 置位后在下一个数据块边界中断，删除当前未完成文件，
     已完成的文件保留，抛出 ImageCancelled。
@@ -676,13 +697,22 @@ def download_images(
         raise ImageError(i18n.tr("error_select_images"))
     os.makedirs(save_dir, exist_ok=True)
     total = len(items)
-    paths: List[str] = []
+    result = DownloadResult()
     session = requests.Session()
 
     for i, item in enumerate(items):
         if cancel_event is not None and cancel_event.is_set():
             raise ImageCancelled()
-        path = _unique_path(save_dir, item.filename, item.extension)
+
+        primary = _primary_path(save_dir, item.filename, item.extension)
+        if skip_existing and os.path.isfile(primary):
+            result.skipped.append(primary)
+            if progress:
+                progress((i + 1) / total * 100, i18n.tr(
+                    "image_skipped_progress", index=i + 1, total=total))
+            continue
+        path = primary if not os.path.exists(primary) else _unique_path(
+            save_dir, item.filename, item.extension)
         part = path + ".part"
 
         def _cleanup_part():
@@ -727,9 +757,9 @@ def download_images(
             raise ImageError(
                 i18n.tr("error_image_download", index=i + 1,
                         error=last_exc.__class__.__name__)) from last_exc
-        paths.append(path)
+        result.paths.append(path)
         if progress:
             progress((i + 1) / total * 100, i18n.tr(
                 "image_done_progress", index=i + 1, total=total))
 
-    return paths
+    return result

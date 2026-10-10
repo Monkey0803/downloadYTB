@@ -10,7 +10,7 @@ import sys
 import types
 from unittest.mock import Mock
 
-from app import dock, gui, settings as settings_mod
+from app import dock, gui, images, settings as settings_mod
 
 INFORMATIONAL = 10
 
@@ -196,7 +196,9 @@ def test_panels_call_dock_on_progress_and_completion():
         calls.clear()
         panel = Mock()
         panel.app = _fake_app_with_gate(True)
-        gui.ImagePanel._download_done(panel, ["/tmp/dir/a.jpg"])
+        # #7 之后 _download_done 接收 DownloadResult 而不是路径列表
+        gui.ImagePanel._download_done(
+            panel, images.DownloadResult(paths=["/tmp/dir/a.jpg"]))
         assert calls == [("done", None)]
 
         # 取消与失败路径会清除角标

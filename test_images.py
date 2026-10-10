@@ -40,7 +40,7 @@ def check_x_photos_all():
         print(f"  图{it.index}: {it.size_text}  orig={'name=orig' in it.url}  {it.url}")
         assert "name=orig" in it.url, "应为 orig 原图链接"
     d = os.path.join(OUT, "all")
-    paths = images.download_images(post.items, save_dir=d)
+    paths = images.download_images(post.items, save_dir=d).paths
     assert len(paths) == len(post.items)
     for p in paths:
         im = Image.open(p)
@@ -51,7 +51,7 @@ def check_x_photos_all():
 
 def check_x_photo_single(post):
     d = os.path.join(OUT, "single")
-    paths = images.download_images([post.items[1]], save_dir=d)
+    paths = images.download_images([post.items[1]], save_dir=d).paths
     assert len(paths) == 1 and len(os.listdir(d)) == 1
     im = Image.open(paths[0])
     print(f"单张下载: {os.path.basename(paths[0])} 分辨率 {im.size[0]}x{im.size[1]}")

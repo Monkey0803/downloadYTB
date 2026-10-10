@@ -974,9 +974,11 @@ class ImagePanel(TFrame):
 
         def work():
             try:
-                paths = images.download_images(sel, save_dir=save_dir,
-                                               progress=on_progress,
-                                               cancel_event=cancel_event)
+                result = images.download_images(
+                    sel, save_dir=save_dir, progress=on_progress,
+                    cancel_event=cancel_event,
+                    skip_existing=bool(self.app.settings.get(
+                        "skip_existing_images", True)))
             except images.ImageCancelled:
                 self.after(0, self._download_cancelled)
             except images.ImageError as exc:
@@ -984,7 +986,7 @@ class ImagePanel(TFrame):
             except Exception as exc:
                 self.after(0, self._download_failed, i18n.tr("images_download_failed", message=exc))
             else:
-                self.after(0, self._download_done, paths)
+                self.after(0, self._download_done, result)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1016,15 +1018,27 @@ class ImagePanel(TFrame):
         _dock_clear(self.app)
         self._set_status(msg, error=True)
 
-    def _download_done(self, paths):
-        self._last_paths = paths
+    def _download_done(self, result):
+        # 跳过（已存在）的文件也算「能找到的产物」，否则全部跳过时
+        #「打开所在文件夹」会没有目标。
+        self._last_paths = list(result.paths) + list(result.skipped)
         self._reset_after_download()
         self.progress.set(0)
         self.open_btn.configure_state("normal")
         _dock_done(self.app)
-        self._set_status(i18n.tr("images_complete", n=len(paths),
-                                 folder=os.path.basename(os.path.dirname(paths[0]))),
-                         ok=True)
+        if not result.paths:
+            # 全部已存在：报「完成 0 张」会让人以为失败了
+            self._set_status(
+                i18n.tr("images_all_skipped", n=len(result.skipped)), ok=True)
+            return
+        folder = os.path.basename(os.path.dirname(result.paths[0]))
+        if result.skipped:
+            self._set_status(i18n.tr("images_complete_skipped", n=len(result.paths),
+                                     skipped=len(result.skipped), folder=folder),
+                             ok=True)
+        else:
+            self._set_status(i18n.tr("images_complete", n=len(result.paths),
+                                     folder=folder), ok=True)
 
     def on_open_folder(self):
         if self._last_paths:
