@@ -242,6 +242,8 @@ bash build/build_linux.sh
 
 推送形如 <code>v1.3.0</code> 的版本 Tag 后，<code>.github/workflows/release.yml</code> 会在 macOS arm64、Windows x64 和 Linux x64 Runner 上分别构建 ZIP 包，并自动创建或更新同名 GitHub Release。工作流会校验 Tag 与 <code>app/__init__.py</code> 中的版本一致，避免上传错版资产。
 
+Release 说明由 <code>build/release_notes.py</code> 读提交信息生成（按 feat/fix/docs 等分组，并把每条提交正文里的要点展开成子条目），因此**提交时写清楚的正文就是发布说明的内容**。如果某次改动改变了用户可见的默认行为，在提交正文里写上「行为变更」，它会出现在说明顶部的独立提示区。
+
 ## 开发方法
 
 ### 修改下载引擎

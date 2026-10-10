@@ -120,16 +120,33 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 生成 Release 说明要读「上一个版本到本版」的提交，必须先取完整历史：
+      # actions/checkout 默认 fetch-depth: 1，那样 git log <prev>..<tag> 是空的。
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           merge-multiple: true
           path: release-assets
+      # 不用 --generate-notes：GitHub 只汇总 PR 与新贡献者，本仓库是直接提交，
+      # 生成出来只有一行 changelog 链接。改为从提交信息分组排版。
+      - name: Generate release notes
+        run: |
+          python3 build/release_notes.py "$RELEASE_TAG" --output release-notes.md \
+            || echo "提交说明生成失败，本版改动见下方 changelog 链接。" > release-notes.md
+          echo "--- release-notes.md 预览 ---"
+          head -20 release-notes.md
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TAG" --generate-notes
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TAG" --notes-file release-notes.md
           fi
           gh release upload "$RELEASE_TAG" release-assets/*.zip --repo "$GITHUB_REPOSITORY" --clobber
