@@ -52,6 +52,8 @@ T = {
     "audio_format_lossless": {"zh_CN": "无损", "zh_TW": "無損", "en": "Lossless", "ko": "무손실", "ja": "ロスレス"},
     "download_subtitles": {"zh_CN": "同时下载字幕", "zh_TW": "同時下載字幕", "en": "Also download subtitles", "ko": "자막도 함께 다운로드", "ja": "字幕もダウンロード"},
     "subtitles": {"zh_CN": "字幕", "zh_TW": "字幕", "en": "Subtitles", "ko": "자막", "ja": "字幕"},
+    "subtitle_pick_title": {"zh_CN": "选择字幕语言", "zh_TW": "選擇字幕語言", "en": "Choose subtitle languages", "ko": "자막 언어 선택", "ja": "字幕の言語を選択"},
+    "subtitle_pick_hint": {"zh_CN": "勾选常用语言即可，不用记 yt-dlp 的语言代码。输入框里非列表内的代码会原样保留。", "zh_TW": "勾選常用語言即可，不用記 yt-dlp 的語言代碼。輸入框裡非清單內的代碼會原樣保留。", "en": "Tick the common languages instead of remembering yt-dlp codes. Codes already in the field that are not in this list are kept as they are.", "ko": "yt-dlp 언어 코드를 외우지 않아도 됩니다. 입력란에 있는 코드 중 목록에 없는 것은 그대로 유지됩니다.", "ja": "yt-dlp の言語コードを覚えなくても、よく使う言語を選ぶだけです。入力欄にあるコードのうち一覧に無いものはそのまま残ります。"},
     "subtitle_langs": {"zh_CN": "字幕语言", "zh_TW": "字幕語言", "en": "Subtitle Languages", "ko": "자막 언어", "ja": "字幕の言語"},
     "subtitle_langs_hint": {"zh_CN": "逗号分隔的语言代码（yt-dlp 写法），例如 zh-Hans,zh-Hant,en。人工字幕与自动字幕都会尝试，文件保存为 .srt 并放在视频旁边。", "zh_TW": "逗號分隔的語言代碼（yt-dlp 寫法），例如 zh-Hans,zh-Hant,en。人工字幕與自動字幕都會嘗試，檔案存成 .srt 並放在影片旁邊。", "en": "Comma-separated language codes (yt-dlp syntax), for example zh-Hans,zh-Hant,en. Manual and automatic subtitles are both attempted; files are saved as .srt next to the video.", "ko": "쉼표로 구분한 언어 코드(yt-dlp 형식)입니다. 예: zh-Hans,zh-Hant,en. 수동/자동 자막을 모두 시도하며 .srt로 동영상 옆에 저장됩니다.", "ja": "カンマ区切りの言語コード（yt-dlp 形式）、例: zh-Hans,zh-Hant,en。手動字幕と自動字幕の両方を試し、.srt として動画の隣に保存します。"},
     "bitrate": {"zh_CN": "比特率", "zh_TW": "比特率", "en": "Bitrate", "ko": "비트레이트", "ja": "ビットレート"},

@@ -126,6 +126,188 @@ def download_dir_key(platform: str, kind: str) -> str:
 # ====================================================================
 
 
+class TextDetailDialog(tk.Toplevel):
+    """完整显示被状态栏截断的文本（#3）。
+
+    状态栏是单行的，长错误（例如 yt-dlp 的原始消息）会被省略号截断，完整内容
+    此前只能通过「复制诊断信息」拿到——普通用户不知道要去那里找。
+    """
+
+    WIDTH = 620
+
+    def __init__(self, master, app, title, body):
+        super().__init__(master)
+        self._body = body
+        self.title(title)
+        self.configure(bg=theme.C().BG)
+        self.transient(master.winfo_toplevel())
+
+        outer = TFrame(self, bg_role="BG")
+        outer.pack(fill="both", expand=True, padx=16, pady=14)
+        TLabel(outer, text=title, font=app.f_section, bg_role="BG").pack(anchor="w")
+
+        holder = TFrame(outer, bg_role="BG")
+        holder.pack(fill="both", expand=True, pady=(8, 10))
+        # wraplength 让长文本换行显示，而不是再截断一次
+        TLabel(holder, text=body, font=app.f_sub, bg_role="BG", fg_role="TEXT",
+               justify="left", anchor="w", wraplength=self.WIDTH - 70).pack(
+            anchor="w", fill="x")
+
+        self.hint_label = TLabel(outer, text="", font=app.f_small, bg_role="BG",
+                                 fg_role="TEXT_SUB")
+        self.hint_label.pack(anchor="w")
+
+        buttons = TFrame(outer, bg_role="BG")
+        buttons.pack(fill="x", pady=(8, 0))
+        PillButton(buttons, i18n.tr("copy"), command=self._copy, font=app.f_btn,
+                   width=90, bg_role="BG").pack(side="left")
+        PillButton(buttons, i18n.tr("close"), command=self._close, primary=True,
+                   font=app.f_btn, width=90, bg_role="BG").pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self._center_on(master)
+
+    def _center_on(self, master):
+        try:
+            self.update_idletasks()
+            x = master.winfo_rootx() + max(20, (master.winfo_width() - self.WIDTH) // 2)
+            y = master.winfo_rooty() + 80
+            self.geometry(f"{self.WIDTH}x+{max(0, x)}+{max(0, y)}")
+        except tk.TclError:
+            pass
+
+    def _copy(self):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(self._body)
+        except tk.TclError:
+            return
+        self.hint_label.configure(text=i18n.tr("copied"))
+
+    def _close(self):
+        self.destroy()
+
+    def show(self):
+        self.grab_set()
+        self.wait_window(self)
+
+
+# 常用字幕语言：代码 + 母语名（母语名按惯例不翻译，也省掉一整套 i18n 键）
+SUBTITLE_LANGUAGES = (
+    ("zh-Hans", "中文（简体）"), ("zh-Hant", "中文（繁體）"), ("en", "English"),
+    ("ja", "日本語"), ("ko", "한국어"), ("es", "Español"), ("fr", "Français"),
+    ("de", "Deutsch"), ("ru", "Русский"), ("pt", "Português"), ("it", "Italiano"),
+    ("ar", "العربية"), ("hi", "हिन्दी"), ("th", "ไทย"), ("vi", "Tiếng Việt"),
+    ("id", "Bahasa Indonesia"),
+)
+
+
+class SubtitleLanguagePicker(tk.Toplevel):
+    """常用字幕语言勾选（#4）。
+
+    原来只能手写 ``zh-Hans,zh-Hant,en`` 这种 yt-dlp 语言代码，普通用户不知道
+    该写什么。输入框仍然保留，用于列表之外的冷门语言。
+    """
+
+    WIDTH = 520
+    HEIGHT = 470
+
+    def __init__(self, master, app, current=""):
+        super().__init__(master)
+        self.app = app
+        self.result = None
+        self._pills = []
+        known = {code for code, _name in SUBTITLE_LANGUAGES}
+        existing = [part.strip() for part in str(current or "").split(",") if part.strip()]
+        chosen = {code for code in existing if code in known}
+        self.extra = [code for code in existing if code not in known]
+
+        self.title(i18n.tr("subtitle_pick_title"))
+        self.configure(bg=theme.C().BG)
+        self.transient(master.winfo_toplevel())
+        self.resizable(False, False)
+
+        outer = TFrame(self, bg_role="BG")
+        outer.pack(fill="both", expand=True, padx=14, pady=12)
+        TLabel(outer, text=i18n.tr("subtitle_pick_title"), font=app.f_section,
+               bg_role="BG").pack(anchor="w")
+        _pack_wrapped_hint(outer, app, i18n.tr("subtitle_pick_hint"),
+                           bg_role="BG", pady=(6, 8))
+
+        holder = TFrame(outer, bg_role="BG")
+        holder.pack(fill="both", expand=True)
+        canvas = tk.Canvas(holder, bg=theme.C().BG, highlightthickness=0, bd=0)
+        bar = tk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        body = TFrame(canvas, bg_role="BG")
+        window = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>",
+                  lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+
+        for code, name in SUBTITLE_LANGUAGES:
+            label = f"{name} · {code}"
+            pill = CheckPill(body, label, tk.BooleanVar(value=code in chosen),
+                             font=app.f_btn, bg_role="BG",
+                             width=_check_pill_width(app.f_btn, label))
+            pill.pack(anchor="w", pady=2)
+            self._pills.append((code, pill))
+
+        buttons = TFrame(outer, bg_role="BG")
+        buttons.pack(fill="x", pady=(10, 0))
+        PillButton(buttons, i18n.tr("select_all"), command=lambda: self._select_all(True),
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="left")
+        PillButton(buttons, i18n.tr("pick_none"), command=lambda: self._select_all(False),
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="left", padx=(8, 0))
+        PillButton(buttons, i18n.tr("confirm"), command=self._confirm, primary=True,
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="right")
+        PillButton(buttons, i18n.tr("cancel"), command=self._cancel,
+                   font=app.f_btn, width=96, bg_role="BG").pack(side="right", padx=(0, 8))
+
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self._center_on(master)
+
+    def _center_on(self, master):
+        try:
+            self.update_idletasks()
+            x = master.winfo_rootx() + max(20, (master.winfo_width() - self.WIDTH) // 2)
+            y = master.winfo_rooty() + 70
+            self.geometry(f"{self.WIDTH}x{self.HEIGHT}+{max(0, x)}+{max(0, y)}")
+        except tk.TclError:
+            pass
+
+    def _select_all(self, value):
+        for _code, pill in self._pills:
+            pill.set_checked(value)
+
+    def _collect(self):
+        """按列表顺序返回勾选的代码，并补上列表外的自定义代码。"""
+        codes = [code for code, pill in self._pills if bool(pill._var.get())]
+        return codes + self.extra
+
+    def _confirm(self):
+        self.result = ",".join(self._collect())
+        self._close()
+
+    def _cancel(self):
+        self.result = None
+        self._close()
+
+    def _close(self):
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
+        self.destroy()
+
+    def show(self):
+        self.grab_set()
+        self.wait_window(self)
+        return self.result
+
+
 class EntryPicker(tk.Toplevel):
     """播放列表条目批量选择弹窗（#2）。
 
@@ -1896,8 +2078,11 @@ class SettingsPage(TFrame):
             value=app.settings.get("subtitle_langs") or ",".join(core.DEFAULT_SUBTITLE_LANGS))
         self.subtitle_langs_var.trace_add(
             "write", lambda *a: self._on_subtitle_langs_change())
-        RoundEntry(sub_row, textvariable=self.subtitle_langs_var, font=f.f_body).pack(
-            side="left", fill="x", expand=True)
+        self.subtitle_langs_entry = RoundEntry(
+            sub_row, textvariable=self.subtitle_langs_var, font=f.f_body)
+        self.subtitle_langs_entry.pack(side="left", fill="x", expand=True)
+        PillButton(sub_row, i18n.tr("choose"), command=self._open_subtitle_picker,
+                   font=f.f_btn, width=74, bg_role="CARD").pack(side="left", padx=(10, 0))
         _pack_wrapped_hint(bs, app, i18n.tr("subtitle_langs_hint"),
                            bg_role="CARD", pady=(8, 0))
         self._track_card("subtitles", card_sub, bs)
