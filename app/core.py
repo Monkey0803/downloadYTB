@@ -16,17 +16,21 @@ from typing import Callable, List, Optional
 import yt_dlp
 
 from . import i18n
+from . import browser_cookies
 from .ffmpeg_util import ffmpeg_location_for_ytdlp
 
 DEFAULT_SAVE_DIR = os.path.expanduser("~/Downloads")
 
-_browser_cookies = ""  # 空 = 不读取浏览器 Cookie
-
 
 def set_browser_cookies(browser: str):
     """设置 yt-dlp 从哪个浏览器读取 Cookie（空字符串为禁用）。"""
-    global _browser_cookies
-    _browser_cookies = (browser or "").strip().lower()
+    browser_cookies.set_browser(browser)
+
+
+def set_cookie_file(path: str):
+    """设置手动导出的 cookies.txt（空字符串为禁用）。"""
+    browser_cookies.set_cookie_file(path)
+
 
 # 进度回调签名: callback(percent: float|None, speed_text: str, eta_text: str, status: str)
 ProgressCallback = Callable[[Optional[float], str, str, str], None]
@@ -93,6 +97,7 @@ class VideoInfo:
     uploader: str
     qualities: List[QualityOption] = field(default_factory=list)  # 可用清晰度（降序）
     audio_options: List[AudioOption] = field(default_factory=list)  # 可用音频比特率（降序）
+    warning: str = ""  # 非致命的降级提示（如浏览器 Cookie 读取失败后改用匿名解析）
 
     @property
     def heights(self) -> List[int]:
@@ -178,13 +183,20 @@ def _base_opts(with_cookies: bool = True) -> dict:
     ffmpeg = ffmpeg_location_for_ytdlp()
     if ffmpeg:
         opts["ffmpeg_location"] = ffmpeg
-    if with_cookies and _browser_cookies:
-        opts["cookiesfrombrowser"] = (_browser_cookies,)
+    if with_cookies:
+        opts.update(browser_cookies.ytdlp_options())
     return opts
 
 
 def _wrap_error(exc: Exception) -> DownloadError:
     msg = str(exc)
+    # Cookie 读取失败要单独识别：yt-dlp 因为 os.walk 静默吞掉权限错误，
+    # 会把搜索根目录当成数据库位置，报出无助于排查的消息（见
+    # app/browser_cookies.py 的说明）。这里换成可操作的指引。
+    if browser_cookies.is_load_error(exc):
+        err = DownloadError(i18n.tr("error_browser_cookie_unavailable"))
+        err.cookie_unavailable = True
+        return err
     if "Requested format is not available" in msg or "Only images are available" in msg:
         err = DownloadError(i18n.tr("error_format_unavailable"))
         err.format_unavailable = True
@@ -264,18 +276,25 @@ def probe(url: str) -> VideoInfo:
             info = entries[0]
         return info
 
+    # cookie_error 记录「浏览器 Cookie 读取失败」；此时不再直接报错，
+    # 而是先尝试匿名解析：不需要登录的内容仍能正常使用。
+    cookie_error = None
     try:
         info = extract(_base_opts())
     except DownloadError:
         raise
     except Exception as exc:  # yt_dlp 抛出多种异常类型，统一包装
         wrapped = _wrap_error(exc)
-        if not (_browser_cookies and getattr(wrapped, "format_unavailable", False)):
+        if getattr(wrapped, "cookie_unavailable", False):
+            cookie_error = wrapped
+            info = None
+        elif browser_cookies.enabled() and getattr(wrapped, "format_unavailable", False):
+            info = None
+        else:
             raise wrapped from exc
-        info = None
 
     if info is None or not _has_usable_formats(info):
-        if _browser_cookies:
+        if browser_cookies.enabled():
             try:
                 retry = extract(_base_opts(with_cookies=False))
             except DownloadError:
@@ -285,6 +304,10 @@ def probe(url: str) -> VideoInfo:
             if retry is not None and _has_usable_formats(retry):
                 info = retry
         if info is None or not _has_usable_formats(info):
+            # Cookie 读取失败且匿名也拿不到格式时才报错，此时 Cookie 就是
+            # 最可能的原因，直接给出可操作的指引。
+            if cookie_error is not None:
+                raise cookie_error
             raise _wrap_error(Exception("Requested format is not available"))
 
     # 按标准档位（format_note 中的 1080p/720p…）归并清晰度。
@@ -382,6 +405,8 @@ def probe(url: str) -> VideoInfo:
         uploader=info.get("uploader") or info.get("channel") or "",
         qualities=qualities,
         audio_options=audio_options,
+        # 解析成功但浏览器 Cookie 被跳过：如实告知，避免用户以为用的是登录态。
+        warning=i18n.tr("cookie_fallback_warning") if cookie_error is not None else "",
     )
 
 
@@ -507,10 +532,15 @@ def _run_download_with_cookie_fallback(url, opts, **kw) -> str:
     try:
         return _run_download(url, opts, **kw)
     except DownloadError as exc:
-        if not (_browser_cookies and getattr(exc, "format_unavailable", False)):
+        recoverable = (
+            getattr(exc, "cookie_unavailable", False)
+            or (browser_cookies.enabled() and getattr(exc, "format_unavailable", False))
+        )
+        if not recoverable:
             raise
         retry_opts = dict(opts)
         retry_opts.pop("cookiesfrombrowser", None)
+        retry_opts.pop("cookiefile", None)
         return _run_download(url, retry_opts, **kw)
 
 

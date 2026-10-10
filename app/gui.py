@@ -21,7 +21,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import core, i18n, images, menubar, settings, theme
+from . import browser_cookies, core, i18n, images, menubar, settings, theme
 from .widgets import (
     CheckPill, GlassCard, ImagePicker, LogoSwatch, PillButton, PillSelect,
     RoundEntry, RoundProgress, SegmentedControl, SidebarItem, TFrame, TLabel,
@@ -401,7 +401,9 @@ class VideoPanel(TFrame):
         self.quality_select.set_values(values)
         self.quality_var.set(values[0])
         self._on_mode_change()
-        self._set_status(i18n.tr("probe_success_video"), ok=True)
+        # 浏览器 Cookie 读取失败但匿名解析成功时给出提示。
+        self._set_status(info.warning or i18n.tr("probe_success_video"),
+                         ok=not info.warning)
 
     def _height_for_label(self, label):
         if not self._info:
@@ -883,9 +885,13 @@ class ImagePanel(TFrame):
         self.picker.set_items(items)
         self.all_var.set(False)
         self._on_selection_change()
-        self._set_status(i18n.tr(
-            "probe_success_media" if mixed else "probe_success_images",
-            n=len(post.items)), ok=True)
+        # 解析成功但浏览器 Cookie 被跳过时如实告知，避免用户误以为用的是登录态。
+        if post.warning:
+            self._set_status(post.warning)
+        else:
+            self._set_status(i18n.tr(
+                "probe_success_media" if mixed else "probe_success_images",
+                n=len(post.items)), ok=True)
         self._load_thumbnails(post)
 
     def _load_thumbnails(self, post):
@@ -1010,8 +1016,9 @@ class ImagePanel(TFrame):
 # ====================================================================
 
 
-def _pack_wrapped_hint(master, app, text):
-    label = TLabel(master, text=text, font=app.f_small, bg_role="BG",
+def _pack_wrapped_hint(master, app, text, bg_role="BG", pady=(0, 8)):
+    """按控件宽度自动换行的说明文字（TLabel 本身不会自动折行）。"""
+    label = TLabel(master, text=text, font=app.f_small, bg_role=bg_role,
                    fg_role="TEXT_SUB", anchor="w", justify="left", wraplength=1)
 
     def update_wraplength(event):
@@ -1020,7 +1027,7 @@ def _pack_wrapped_hint(master, app, text):
             label.configure(wraplength=wraplength)
 
     label.bind("<Configure>", update_wraplength)
-    label.pack(fill="x", pady=(0, 8))
+    label.pack(fill="x", pady=pady)
     return label
 
 
@@ -1232,9 +1239,11 @@ class SettingsPage(TFrame):
 
         # —— 登录 Cookie ——
         card3 = GlassCard(self._scroll_body)
-        card3.set_height(150)
+        card3.set_height(310)
         card3.pack(fill="x", pady=(0, 12))
         b3 = card3.body
+        self._cookie_card = card3
+        self._cookie_card_body = b3
         TLabel(b3, text=i18n.tr("browser_cookie"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         row3 = TFrame(b3, bg_role="CARD")
@@ -1250,10 +1259,54 @@ class SettingsPage(TFrame):
                                         values=[l for l, _ in self._cookie_options],
                                         font=f.f_btn, width=150)
         self.cookie_select.pack(side="left")
-        TLabel(b3, text=i18n.tr("cookie_hint"),
-               font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB",
-               anchor="w", justify="left").pack(anchor="w", fill="x", pady=(10, 0))
+        _pack_wrapped_hint(b3, app, i18n.tr("cookie_hint"),
+                           bg_role="CARD", pady=(10, 0))
+
+        # —— cookies.txt：不读浏览器数据库，无需「完全磁盘访问权限」——
+        TLabel(b3, text=i18n.tr("cookie_file"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w", pady=(16, 0))
+        row_file = TFrame(b3, bg_role="CARD")
+        row_file.pack(fill="x", pady=(8, 0))
+        self.cookie_file_var = tk.StringVar(
+            value=app.settings.get("cookie_file", "") or i18n.tr("cookie_file_none"))
+        self.cookie_file_entry = RoundEntry(row_file, textvariable=self.cookie_file_var,
+                                            font=f.f_body)
+        self.cookie_file_entry.pack(side="left", fill="x", expand=True)
+        # 仅作展示，禁止手动编辑（避免用户输入不存在的路径）
+        self.cookie_file_entry.entry.configure(
+            state="readonly", readonlybackground=theme.C().FIELD_BG)
+        PillButton(row_file, i18n.tr("choose_cookie_file"),
+                   command=self._choose_cookie_file,
+                   font=f.f_btn, width=110, bg_role="CARD").pack(side="left", padx=(10, 0))
+        PillButton(row_file, i18n.tr("clear_cookie_file"),
+                   command=self._clear_cookie_file,
+                   font=f.f_btn, width=64, bg_role="CARD").pack(side="left", padx=(8, 0))
+        cookie_file_hint = i18n.tr("cookie_file_hint")
+        if browser_cookies.cookie_file_missing():
+            cookie_file_hint = f"{i18n.tr('cookie_file_missing')}\n{cookie_file_hint}"
+        self._cookie_file_hint = _pack_wrapped_hint(
+            b3, app, cookie_file_hint, bg_role="CARD", pady=(10, 0))
+        # 说明文字的换行行数随语言/窗口宽度变化，卡片高度按内容实测，
+        # 避免英文、日文文案被卡片下沿裁切（固定高度已不够用）。
+        b3.bind("<Configure>", lambda _e: self._fit_cookie_card(), add="+")
+        self.after_idle(self._fit_cookie_card)
         self._bind_scroll_events()
+
+    def _fit_cookie_card(self):
+        """按内容实际高度调整 Cookie 卡片高度。"""
+        body = getattr(self, "_cookie_card_body", None)
+        card = getattr(self, "_cookie_card", None)
+        if body is None or card is None:
+            return
+        try:
+            body.update_idletasks()
+            needed = body.winfo_reqheight() + 34  # 卡片上下各 16px 内边距 + 描边
+        except tk.TclError:
+            # 切换语言会重建整个设置页，延迟回调可能落在已销毁的控件上。
+            return
+        if needed != getattr(self, "_cookie_card_height", None):
+            self._cookie_card_height = needed
+            card.set_height(needed)
 
     def _walk_widgets(self, widget=None):
         """遍历设置页控件，确保鼠标停在任意控件上都能滚动。"""
@@ -1344,6 +1397,25 @@ class SettingsPage(TFrame):
         core.set_browser_cookies(value)
         images.set_browser_cookies(value)
 
+    def _apply_cookie_file(self, path):
+        """写入 cookies.txt 设置并同步给两个引擎。"""
+        self.app.settings["cookie_file"] = path
+        settings.save(self.app.settings)
+        core.set_cookie_file(path)
+        images.set_cookie_file(path)
+        self.cookie_file_var.set(path or i18n.tr("cookie_file_none"))
+
+    def _choose_cookie_file(self):
+        path = filedialog.askopenfilename(
+            initialdir=os.path.dirname(self.app.settings.get("cookie_file", "")) or None,
+            title=i18n.tr("cookie_file"),
+            filetypes=[("cookies.txt", "*.txt"), ("All files", "*.*")])
+        if path:
+            self._apply_cookie_file(path)
+
+    def _clear_cookie_file(self):
+        self._apply_cookie_file("")
+
     def _on_language_change(self):
         name = self.language_var.get()
         code = next((code for label, code in i18n.language_options()
@@ -1375,6 +1447,8 @@ class App(tk.Tk):
         theme.set_mode(self.settings.get("theme", "system"))
         core.set_browser_cookies(self.settings.get("browser_cookies", ""))
         images.set_browser_cookies(self.settings.get("browser_cookies", ""))
+        core.set_cookie_file(self.settings.get("cookie_file", ""))
+        images.set_cookie_file(self.settings.get("cookie_file", ""))
 
         self.title(i18n.tr("app_title"))
         self.geometry("1020x745")

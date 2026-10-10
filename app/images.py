@@ -20,6 +20,7 @@ import requests
 import yt_dlp
 
 from . import i18n
+from . import browser_cookies
 from gallery_dl import config as gdl_config
 from gallery_dl import job as gdl_job
 
@@ -34,13 +35,15 @@ _WEIBO_VIDEO_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
 # 进度回调签名: callback(percent: float, text: str)
 ImageProgress = Callable[[float, str], None]
 
-_browser_cookies = ""  # 空 = 不读取浏览器 Cookie
-
 
 def set_browser_cookies(browser: str):
-    """设置 gallery-dl 从哪个浏览器读取 Cookie（空字符串为禁用）。"""
-    global _browser_cookies
-    _browser_cookies = (browser or "").strip().lower()
+    """设置 gallery-dl / yt-dlp 从哪个浏览器读取 Cookie（空字符串为禁用）。"""
+    browser_cookies.set_browser(browser)
+
+
+def set_cookie_file(path: str):
+    """设置手动导出的 cookies.txt（空字符串为禁用）。"""
+    browser_cookies.set_cookie_file(path)
 
 
 def _media_headers(url: str) -> dict:
@@ -87,6 +90,7 @@ class ImagePost:
     title: str
     author: str
     items: List[ImageItem] = field(default_factory=list)
+    warning: str = ""  # 非致命的降级提示（如浏览器 Cookie 读取失败后改用匿名解析）
 
     @property
     def has_video(self) -> bool:
@@ -101,6 +105,10 @@ def _twitter_thumb(url: str) -> str:
 
 
 def _probe_error(name: str, msg: str, url: str) -> ImageError:
+    # Cookie 读取失败优先识别：yt-dlp 的原始消息只提到搜索目录，用户无从
+    # 判断该怎么处理（见 app/browser_cookies.py 的说明）。
+    if browser_cookies.is_load_error(msg):
+        return ImageError(i18n.tr("error_browser_cookie_unavailable"))
     low = (msg or "").lower()
     is_ig = "instagram" in url.lower()
     if "login" in low or "authrequired" in name.lower() or "authenticated" in low \
@@ -176,7 +184,7 @@ def _weibo_status_id(url: str, info: Optional[dict]) -> Optional[str]:
     return None
 
 
-def _weibo_ytdlp_options() -> dict:
+def _weibo_ytdlp_options(with_cookies: bool = True) -> dict:
     # 图片微博经常会被 yt-dlp 识别为“没有视频格式”；保留解析结果中的
     # 状态 ID，后续仍可从微博状态 API 读取图片/GIF。
     options = {
@@ -185,15 +193,21 @@ def _weibo_ytdlp_options() -> dict:
         "skip_download": True,
         "ignore_no_formats_error": True,
     }
-    if _browser_cookies:
-        options["cookiesfrombrowser"] = (_browser_cookies,)
+    if with_cookies:
+        options.update(browser_cookies.ytdlp_options())
     return options
 
 
-def _weibo_session(ydl: yt_dlp.YoutubeDL) -> requests.Session:
-    """把 yt-dlp 生成的微博访客/浏览器 Cookie 转给 requests。"""
+def _weibo_session(ydl: Optional[yt_dlp.YoutubeDL]) -> requests.Session:
+    """把 yt-dlp 生成的微博访客/浏览器 Cookie 转给 requests。
+
+    ydl 为 None（连 yt-dlp 实例都没能建起来）时返回一个干净的会话，
+    微博访客 Cookie 会在 _weibo_status_data 里按需补齐。
+    """
     session = requests.Session()
     session.headers.update({"User-Agent": UA, "Referer": _WEIBO_REFERER})
+    if ydl is None:
+        return session
     for cookie in ydl.cookiejar:
         session.cookies.set(cookie.name, cookie.value,
                             domain=cookie.domain, path=cookie.path)
@@ -376,16 +390,35 @@ def _weibo_image_type(session: requests.Session, thumb_url: str) -> str:
 
 
 def _probe_weibo_images(url: str) -> ImagePost:
-    """解析微博状态中的图片和 GIF。"""
-    ydl = yt_dlp.YoutubeDL(_weibo_ytdlp_options())
+    """解析微博状态中的图片和 GIF。
+
+    微博图片/GIF 实际走状态接口，浏览器 Cookie 只是可选增强。yt-dlp 的
+    YoutubeDL 在构造时就会加载 Cookie 数据库，因此构造本身也必须纳入
+    容错：Cookie 读取失败（打包 App 未获「完全磁盘访问权限」时的常见
+    情况）时降级为匿名重试，而不是让整个解析失败。
+    """
+    ydl = None
     info = None
     extract_error = None
-    try:
-        info = ydl.extract_info(url, download=False)
-    except Exception as exc:
-        # 图片微博可能没有视频格式，yt-dlp 解析失败并不代表状态 API
-        # 不可访问；直链含数字 ID 时仍可继续使用已建立的访客会话。
-        extract_error = exc
+    cookie_fallback = ""
+    attempts = (True, False) if browser_cookies.enabled() else (False,)
+    for index, with_cookies in enumerate(attempts):
+        try:
+            ydl = yt_dlp.YoutubeDL(_weibo_ytdlp_options(with_cookies))
+            info = ydl.extract_info(url, download=False)
+        except Exception as exc:
+            extract_error = exc
+            # 还有匿名重试机会，且这次失败确实源于 Cookie 读取。
+            if with_cookies and browser_cookies.is_load_error(exc) \
+                    and index + 1 < len(attempts):
+                cookie_fallback = i18n.tr("cookie_fallback_warning")
+                continue
+            # 图片微博可能没有视频格式，yt-dlp 解析失败并不代表状态 API
+            # 不可访问；直链含数字 ID 时仍可继续使用已建立的访客会话。
+            break
+        else:
+            extract_error = None
+            break
 
     status_id = _weibo_status_id(url, info)
     if not status_id:
@@ -481,7 +514,8 @@ def _probe_weibo_images(url: str) -> ImagePost:
     if not items:
         raise ImageError(i18n.tr("error_no_images", suffix=""))
 
-    return ImagePost(url=url, title=title[:120], author=author, items=items)
+    return ImagePost(url=url, title=title[:120], author=author, items=items,
+                     warning=cookie_fallback)
 
 
 def probe_images(url: str) -> ImagePost:
@@ -498,8 +532,10 @@ def probe_images(url: str) -> ImagePost:
     gdl_config.set(("extractor", "instagram"), "videos", False)
     # X 图片默认就是 orig；显式声明保证拿到最高清原图
     gdl_config.set(("extractor", "twitter"), "size", "orig")
-    if _browser_cookies:
-        gdl_config.set(("extractor",), "cookies", [_browser_cookies])
+    gdl_cookies = browser_cookies.gallery_dl_cookies()
+    if gdl_cookies is not None:
+        # gallery-dl 在 Cookie 读取失败时只记录警告并继续，不会中断解析。
+        gdl_config.set(("extractor",), "cookies", gdl_cookies)
 
     try:
         j = gdl_job.DataJob(url, file=None)

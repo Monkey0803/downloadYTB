@@ -15,6 +15,7 @@ DEFAULTS = {
     "save_dir": "",           # 空表示使用 ~/Downloads
     "save_dirs": {},           # 按平台 + 下载类型记录的保存目录
     "browser_cookies": "",    # 空表示不读取浏览器 Cookie；可选 chrome/safari/firefox/edge
+    "cookie_file": "",        # 手动导出的 cookies.txt 路径；优先于浏览器 Cookie
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint
 }
 
