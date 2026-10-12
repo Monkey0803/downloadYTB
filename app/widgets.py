@@ -675,6 +675,9 @@ class ImagePicker(tk.Frame):
     """可滚动的图片缩略图网格，每张图带复选框，点击切换选中。
 
     items 元素为 dict: {"label": str, "sub": str, "selected": bool, "photo": PhotoImage|None}
+
+    ``on_change`` 是**无参**回调，选中态变化时调用（鼠标点击、``set_all``、
+    空格/回车勾选都走它）。
     """
 
     CELL_W = 132
@@ -695,8 +698,12 @@ class ImagePicker(tk.Frame):
         self._items = []
         self._scrollbar_visible = False
         self._pointer_over_canvas = False
+        # 缩略图是画布上的图形而不是子控件，所以键盘导航靠自己维护一个游标
+        self._cursor = None
+        self._focused = False
         self.canvas = tk.Canvas(self, bg=getattr(theme.C(), bg_role),
-                                highlightthickness=0, bd=0, height=height)
+                                highlightthickness=0, bd=0, height=height,
+                                takefocus=1)
         self.scrollbar = tk.Scrollbar(self, orient="vertical",
                                       command=self.canvas.yview, takefocus=0)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
@@ -709,11 +716,21 @@ class ImagePicker(tk.Frame):
         self.canvas.bind("<Enter>", self._on_pointer_enter)
         self.canvas.bind("<Leave>", self._on_pointer_leave)
         self.canvas.bind("<Unmap>", self._on_pointer_leave)
+        self.canvas.bind("<FocusIn>", self._on_focus_in)
+        self.canvas.bind("<FocusOut>", self._on_focus_out)
+        self.canvas.bind("<Left>", lambda e: self._move_cursor(-1))
+        self.canvas.bind("<Right>", lambda e: self._move_cursor(1))
+        self.canvas.bind("<Up>", lambda e: self._move_cursor_row(-1))
+        self.canvas.bind("<Down>", lambda e: self._move_cursor_row(1))
+        self.canvas.bind("<Home>", lambda e: self._move_cursor_to(0))
+        self.canvas.bind("<End>", lambda e: self._move_cursor_to(len(self._items) - 1))
+        bind_activation(self.canvas, self._toggle_cursor_item)
 
     # -- 数据接口 --
 
     def set_items(self, items):
         self._items = items
+        self._cursor = 0 if items else None
         self.canvas.yview_moveto(0)
         self._draw()
 
@@ -809,6 +826,12 @@ class ImagePicker(tk.Frame):
             else:
                 c.create_oval(bx, by, bx + 18, by + 18, fill=pal.CARD,
                               outline=pal.CHECK_BORDER, width=1.5)
+        # 键盘游标：只在获得焦点时画，用主题文字色（与选中的强调色描边区分开）
+        index = self.cursor_index() if self._focused else None
+        if index is not None:
+            draw_round_rect(c, *self._cursor_ring_bounds(index, cols),
+                            self.CARD_RADIUS + 2, fill="", outline=pal.TEXT, width=2,
+                            tags="cursor")
             c.create_text(x + self.CELL_W / 2, y + self.THUMB_H + 12,
                           text=it.get("label", ""), fill=pal.TEXT, font=it.get("font_small"))
             sub = it.get("sub")
@@ -816,6 +839,12 @@ class ImagePicker(tk.Frame):
                 c.create_text(x + self.CELL_W / 2, y + self.THUMB_H + 28,
                               text=sub, fill=pal.TEXT_SUB, font=it.get("font_small"))
         c.configure(scrollregion=(0, 0, w, total_h))
+
+    def _cursor_ring_bounds(self, index, cols):
+        row, col = divmod(index, cols)
+        x = self.OUTER_PAD + col * (self.CELL_W + self.GAP_X)
+        y = self.OUTER_PAD + row * (self.CELL_H + self.GAP_Y)
+        return x - 4, y - 6, x + self.CELL_W + 4, y + self.CELL_H - 4
 
     def _on_click(self, e):
         if not self._items:
@@ -834,10 +863,87 @@ class ImagePicker(tk.Frame):
             return
         idx = row * cols + col
         if 0 <= idx < len(self._items):
+            # 点过之后游标落在这里，接着按方向键/空格就顺理成章
+            self._cursor = idx
             self._items[idx]["selected"] = not self._items[idx].get("selected")
             self._draw()
             if self._on_change:
                 self._on_change()
+
+    # -- 键盘导航 --
+
+    def cursor_index(self):
+        """键盘游标所在的下标；没有可选内容时为 None。"""
+        if not self._items or self._cursor is None:
+            return None
+        return max(0, min(len(self._items) - 1, self._cursor))
+
+    def _on_focus_in(self, _event=None):
+        self._focused = True
+        if self._cursor is None and self._items:
+            self._cursor = 0
+        self._draw()
+
+    def _on_focus_out(self, _event=None):
+        self._focused = False
+        self._draw()
+
+    def _move_cursor(self, delta):
+        if not self._items:
+            return "break"
+        start = self.cursor_index()
+        start = 0 if start is None else start
+        self._move_cursor_to(start + delta)
+        return "break"
+
+    def _move_cursor_row(self, delta):
+        """上下移动一整行；行内列数会随窗口宽度变化，所以实时算。"""
+        if not self._items:
+            return "break"
+        cols = self._cols()
+        start = self.cursor_index()
+        start = 0 if start is None else start
+        self._move_cursor_to(start + delta * cols)
+        return "break"
+
+    def _move_cursor_to(self, index):
+        if not self._items:
+            return "break"
+        self._cursor = max(0, min(len(self._items) - 1, index))
+        self._draw()
+        self._ensure_cursor_visible()
+        return "break"
+
+    def _toggle_cursor_item(self, _event=None):
+        """空格/回车：勾选或取消游标所在的那张图。"""
+        index = self.cursor_index()
+        if index is None:
+            return "break"
+        self._items[index]["selected"] = not self._items[index].get("selected")
+        self._draw()
+        if self._on_change:
+            self._on_change()
+        return "break"
+
+    def _ensure_cursor_visible(self):
+        """把游标滚进可视区域，否则键盘选了却看不见。"""
+        index = self.cursor_index()
+        if index is None:
+            return
+        canvas = self.canvas
+        cols = self._cols()
+        total = self._content_height(cols)
+        height = canvas.winfo_height()
+        if total <= 0 or height <= 0:
+            return
+        row = index // cols
+        cell_y = self.OUTER_PAD + row * (self.CELL_H + self.GAP_Y)
+        top = canvas.canvasy(0)
+        if cell_y < top:
+            canvas.yview_moveto(max(0.0, (cell_y - self.OUTER_PAD) / total))
+        elif cell_y + self.CELL_H > top + height:
+            canvas.yview_moveto(max(0.0, min(
+                1.0, (cell_y + self.CELL_H + self.OUTER_PAD - height) / total)))
 
     def _on_pointer_enter(self, _event):
         self._pointer_over_canvas = True

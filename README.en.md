@@ -10,7 +10,7 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 
 - One desktop interface for parsing and downloading content from multiple platforms.
 - Select an available video quality after probing a URL; audio-only MP3 downloads are supported.
-- Parse X, Instagram, and Weibo image posts into a thumbnail grid, then download all images or selected originals. Weibo GIFs retain their GIF format.
+- Parse X, Instagram, and Weibo image posts into a thumbnail grid, then download all images or selected originals; the grid is also keyboard-operable (Tab in, arrow keys to move the cursor, Space to toggle). Weibo GIFs retain their GIF format.
 - Weibo supports videos, images/GIFs, and batch image downloads.
 - Pause, resume from partial files, or cancel video downloads. Image downloads can also be cancelled; completed files are kept.
 - Remember the last directory separately for each download mode. Video, audio-only, and image downloads do not overwrite one another's directory settings.

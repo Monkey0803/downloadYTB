@@ -148,6 +148,14 @@ the widget's own foreground colour, which is guaranteed to contrast with its fil
 themes. Add the same four things to any new interactive widget; `test_keyboard.py` checks
 all of them, including that Tab from the URL field reaches a Canvas widget.
 
+`ImagePicker` is the exception that needs different plumbing: its thumbnails are canvas
+items, not child widgets, so there is nothing for Tab to land on. It keeps its own cursor
+(`cursor_index()`), draws a ring in the theme's text colour while focused (the `cursor` tag,
+visually distinct from the accent outline of a selected cell), binds arrow/Home/End/activation
+keys, and scrolls the cursor into view. Its `on_change` is a **no-arg** callback like the
+panels pass — `list.append` would raise a `TypeError` that Tk swallows, which looks exactly
+like "the callback was never called".
+
 Tk detail that bites when testing this: `widget.event_generate("<Return>")` only fires the
 binding when that widget **holds focus** — otherwise the key goes to the focused widget and
 nothing happens. Tests must call `focus_force()` first (the test window is usually not

@@ -257,5 +257,146 @@ class KeyboardSupportTests(unittest.TestCase):
         self.assertEqual(str(reached.cget("takefocus")), "1")
 
 
+class ImagePickerKeyboardTests(unittest.TestCase):
+    """缩略图网格的键盘导航。
+
+    格子是画在画布上的图形、没有子控件，所以 Tab 到画布后要靠自己维护一个游标：
+    方向键移动、Home/End 跳转、空格/回车勾选、移动时自动滚进可视区域。这是键盘
+    可达性里最后补上的一块（此前只能鼠标点）。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = _shared_app()
+
+    def setUp(self):
+        settings_mod.save = lambda data: None
+        self.host = tk.Toplevel(self.app)
+        self.host.geometry("420x320")
+        self.changes = []
+        # on_change 是**无参**回调（与面板用法一致），传 list.append 会被 Tk 吞成
+        # TypeError，看起来像「回调没被调用」
+        self.picker = widgets.ImagePicker(self.host, on_change=self._record_change,
+                                          height=140)
+        self.picker.pack(fill="both", expand=True, padx=10, pady=10)
+        self.items = [{"label": f"图{i}", "sub": "", "selected": False, "photo": None,
+                       "font_small": self.app.f_small} for i in range(9)]
+        self.picker.set_items(self.items)
+        self.host.update_idletasks()
+        for _ in range(4):
+            self.host.update()
+
+    def tearDown(self):
+        settings_mod.save = _ORIGINAL_SAVE
+        self.host.destroy()
+
+    def _record_change(self):
+        self.changes.append(1)
+
+    def _press(self, key):
+        """按键前必须先让画布持有焦点：否则事件会发给别的控件（Tk 的坑）。"""
+        self.picker.canvas.focus_force()
+        self.host.update_idletasks()
+        self.picker.canvas.event_generate(key)
+        self.host.update_idletasks()
+
+    def test_canvas_is_tab_reachable(self):
+        self.assertEqual(str(self.picker.canvas.cget("takefocus")), "1")
+
+    def test_cursor_starts_at_the_first_item(self):
+        self.assertEqual(self.picker.cursor_index(), 0)
+
+    def test_right_and_left_move_the_cursor(self):
+        self._press("<Right>")
+        self.assertEqual(self.picker.cursor_index(), 1)
+        self._press("<Right>")
+        self.assertEqual(self.picker.cursor_index(), 2)
+        self._press("<Left>")
+        self.assertEqual(self.picker.cursor_index(), 1)
+
+    def test_down_and_up_move_a_whole_row(self):
+        cols = self.picker._cols()
+        self.assertGreaterEqual(cols, 1, "画布宽度不足，测试环境异常")
+        self.picker._move_cursor_to(cols - 1)
+        self._press("<Down>")
+        self.assertEqual(self.picker.cursor_index(), cols * 2 - 1)
+        self._press("<Up>")
+        self.assertEqual(self.picker.cursor_index(), cols - 1)
+
+    def test_cursor_is_clamped_at_both_ends(self):
+        self._press("<Left>")
+        self.assertEqual(self.picker.cursor_index(), 0)
+        self.picker._move_cursor_to(len(self.items) - 1)
+        self._press("<Right>")
+        self.assertEqual(self.picker.cursor_index(), len(self.items) - 1)
+
+    def test_home_and_end_jump(self):
+        self._press("<End>")
+        self.assertEqual(self.picker.cursor_index(), len(self.items) - 1)
+        self._press("<Home>")
+        self.assertEqual(self.picker.cursor_index(), 0)
+
+    def test_space_toggles_the_cursor_item(self):
+        self._press("<Right>")
+        self._press("<space>")
+        self.assertTrue(self.items[1]["selected"])
+        self.assertEqual(len(self.changes), 1)
+        self._press("<space>")
+        self.assertFalse(self.items[1]["selected"])
+
+    def test_return_toggles_the_cursor_item(self):
+        self._press("<Return>")
+        self.assertTrue(self.items[0]["selected"])
+
+    def test_moving_the_cursor_does_not_change_selection(self):
+        self._press("<space>")
+        self._press("<Right>")
+        self._press("<Right>")
+        self.assertEqual(self.picker.selected_indices(), [0])
+
+    def test_cursor_is_drawn_only_while_focused(self):
+        self.host.update()
+        self.picker.canvas.event_generate("<FocusOut>")
+        self.host.update_idletasks()
+        self.assertEqual(self.picker.canvas.find_withtag("cursor"), ())
+        self.picker.canvas.focus_force()
+        self.picker.canvas.event_generate("<FocusIn>")
+        self.host.update_idletasks()
+        self.assertTrue(self.picker.canvas.find_withtag("cursor"),
+                        "获得焦点后应当画出游标环")
+
+    def test_click_moves_the_cursor(self):
+        cols = self.picker._cols()
+        index = min(len(self.items) - 1, cols)     # 第二行第一格
+        row, col = divmod(index, cols)
+        x = self.picker.OUTER_PAD + col * (self.picker.CELL_W + self.picker.GAP_X) + 8
+        y = self.picker.OUTER_PAD + row * (self.picker.CELL_H + self.picker.GAP_Y) + 8
+        self.picker.canvas.event_generate("<Button-1>", x=x, y=y)
+        self.host.update_idletasks()
+        self.assertEqual(self.picker.cursor_index(), index)
+        self._press("<Right>")
+        self.assertEqual(self.picker.cursor_index(), index + 1)
+
+    def test_cursor_scrolls_into_view(self):
+        for _ in range(len(self.items)):
+            self._press("<Down>")
+        self.assertGreater(self.picker.canvas.yview()[0], 0.0,
+                           "游标移到底部后应当自动滚动")
+
+    def test_empty_picker_is_safe(self):
+        self.picker.set_items([])
+        self.host.update_idletasks()
+        self.assertIsNone(self.picker.cursor_index())
+        for key in ("<Right>", "<Left>", "<Down>", "<Up>", "<Home>", "<End>",
+                    "<space>", "<Return>"):
+            self._press(key)        # 不应抛异常
+        self.assertEqual(self.changes, [])
+
+    def test_set_items_resets_the_cursor(self):
+        self.picker._move_cursor_to(5)
+        self.picker.set_items(self.items)
+        self.assertEqual(self.picker.cursor_index(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
