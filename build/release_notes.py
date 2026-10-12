@@ -79,8 +79,19 @@ class Commit:
 
     @property
     def is_breaking(self):
-        haystack = (self.subject + "\n" + self.body).lower()
-        return any(marker.lower() in haystack for marker in BREAKING_MARKERS)
+        """正文里**以**标记开头的那一行（约定见 AGENTS.md）。
+
+        刻意不做「全文包含」匹配：本仓库自己的提交里就有「提交正文含『行为变更』的
+        会被提到说明顶部」这种叙述，全文匹配会把发布说明机制那次提交也提到顶部
+        （真实出现过一次）。
+        """
+        for bullet in self.bullets:
+            lowered = bullet.lower()
+            if any(lowered.startswith(marker.lower()) for marker in BREAKING_MARKERS):
+                return True
+        # 主题行里写了标记也算：句子短、指向明确，误判风险很低（正文才需要防误判）
+        subject = self.subject.lower()
+        return any(marker.lower() in subject for marker in BREAKING_MARKERS)
 
     def __repr__(self):  # pragma: no cover - 调试用
         return f"<Commit {self.type}: {self.text[:30]!r}>"

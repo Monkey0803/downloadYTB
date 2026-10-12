@@ -72,6 +72,25 @@ class BreakingTests(unittest.TestCase):
             commit = rn.parse_commits(log(("fix(repo): 改", body)))[0]
             self.assertTrue(commit.is_breaking, body)
 
+    def test_marker_mentioned_mid_bullet_is_not_breaking(self):
+        """本仓库自己的提交里就有「提交正文含『行为变更』的会被提到顶部」这种叙述。
+
+        全文匹配会把它也提到顶部——真实发生过一次，所以规则是「以标记开头」。
+        """
+        commit = rn.parse_commits(log(
+            ("ci(repo): 发布说明改为从提交信息生成",
+             "- 提交正文含「行为变更」的会被提到说明顶部单独提示")))[0]
+        self.assertFalse(commit.is_breaking)
+
+    def test_marker_at_bullet_start_is_breaking(self):
+        commit = rn.parse_commits(log(
+            ("fix(repo): 改了默认值", "- 行为变更：默认值从 A 改成 B")))[0]
+        self.assertTrue(commit.is_breaking)
+
+    def test_marker_in_the_subject_is_breaking(self):
+        commit = rn.parse_commits(log(("feat(repo): 行为变更：新的默认行为", "- 细节")))[0]
+        self.assertTrue(commit.is_breaking)
+
     def test_normal_commit_is_not_breaking(self):
         commit = rn.parse_commits(log(("fix(repo): 常规修复", "- 只是修了个错")))[0]
         self.assertFalse(commit.is_breaking)
