@@ -20,6 +20,7 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - A macOS status-bar item plus runtime Dock/window logo switching. macOS-only menu-bar code is disabled on Windows and Linux.
 - Remembers the window size and position, and falls back to a visible area when a saved position becomes unreachable (for example after unplugging an external display).
 - Keyboard shortcuts: ⌘↩ probe, ⌘D start download, ⌘P pause/resume, ⌘L focus the URL field, ⌘, open Settings, Esc cancel an in-progress task.
+- Keyboard operable: Tab moves between buttons, checkboxes, dropdowns and the sidebar; Return/Space activates, arrow keys switch segmented controls.
 - Settings checks whether cookies can actually be read and offers an "Open System Settings" shortcut or a cookies.txt alternative when they cannot.
 - One-click diagnostic copy (versions, OS, cookie status, last error) for pasting into an issue; it contains no personal paths or cookie contents.
 - Cookies can be configured per platform (for example only Instagram), keeping the other platforms anonymous.

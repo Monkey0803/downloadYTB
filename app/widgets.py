@@ -45,6 +45,28 @@ def ellipsize_filename(name: str, font, max_px: int) -> str:
     return stem + "…" + ext
 
 
+# 需要键盘激活的控件（按钮/复选/下拉/侧边栏/色板）都绑这三个键。
+# Canvas 上的 <space> 不会当成字符输入，所以可以安全地当「确认键」用。
+ACTIVATION_KEYS = ("<Return>", "<KP_Enter>", "<space>")
+
+
+def bind_activation(widget, handler):
+    """把 Return / 小键盘回车 / 空格绑到激活处理函数上。"""
+    for sequence in ACTIVATION_KEYS:
+        widget.bind(sequence, handler)
+
+
+def draw_focus_ring(widget, w, h, radius, color):
+    """键盘焦点环。
+
+    颜色刻意用控件自身的**前景色**：前景色与填充色本来就是对比色，所以主色按钮
+    （白字蓝底）和次级按钮（深字浅底）都能看清，不必再引入主题角色。
+    """
+    if w < 8 or h < 8:
+        return
+    draw_round_rect(widget, 2, 2, w - 3, h - 3, radius, fill="", outline=color, width=2)
+
+
 def hand_cursor():
     return "pointinghand" if sys.platform == "darwin" else "hand2"
 
@@ -152,10 +174,16 @@ class PillButton(tk.Canvas):
         self._font = font
         self._state = "normal"
         self._hover = False
+        self._focused = False
+        # takefocus 让 Tab 能走到这里；禁用时在 configure_state 里关掉
+        self.configure(takefocus=1)
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        bind_activation(self, self._on_key)
 
     def _colors(self):
         c = theme.C()
@@ -176,6 +204,8 @@ class PillButton(tk.Canvas):
         fill, fg = self._colors()
         draw_round_rect(self, 1, 1, w - 1, h - 1, (h - 2) / 2, fill=fill, outline="")
         self.create_text(w / 2, h / 2 - 1, text=self._text, fill=fg, font=self._font)
+        if self._focused:
+            draw_focus_ring(self, w, h, (h - 2) / 2, fg)
 
     def _on_enter(self, e):
         self._hover = True
@@ -191,12 +221,27 @@ class PillButton(tk.Canvas):
         if self._state == "normal" and self._command:
             self._command()
 
+    def _on_focus_in(self, e=None):
+        self._focused = True
+        self._draw()
+
+    def _on_focus_out(self, e=None):
+        self._focused = False
+        self._draw()
+
+    def _on_key(self, e=None):
+        if self._state == "normal" and self._command:
+            self._command()
+        return "break"
+
     def set_text(self, text):
         self._text = text
         self._draw()
 
     def configure_state(self, state):
         self._state = state
+        # 禁用控件不该被 Tab 选中，否则键盘用户会停在点不动的按钮上
+        self.configure(takefocus=1 if state == "normal" else 0)
         self._draw()
 
     def retheme(self):
@@ -216,8 +261,16 @@ class SegmentedControl(tk.Canvas):
         self._var = variable
         self._command = command
         self._font = font
+        self._focused = False
+        self.configure(takefocus=1)
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Button-1>", self._on_click)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        for sequence in ("<Left>", "<Up>"):
+            self.bind(sequence, lambda e: self._step(-1))
+        for sequence in ("<Right>", "<Down>"):
+            self.bind(sequence, lambda e: self._step(1))
 
     def _draw(self):
         self.delete("all")
@@ -237,6 +290,8 @@ class SegmentedControl(tk.Canvas):
                                 (h - 6) / 2, fill=c.SEG_ACTIVE, outline="")
             self.create_text(x1 + seg_w / 2, h / 2 - 1, text=label,
                              fill=c.TEXT if value == cur else c.TEXT_SUB, font=self._font)
+        if self._focused:
+            draw_focus_ring(self, w, h, (h - 2) / 2, c.ACCENT)
 
     def _on_click(self, e):
         w = self.winfo_width()
@@ -248,6 +303,31 @@ class SegmentedControl(tk.Canvas):
             self._draw()
             if self._command:
                 self._command()
+
+    def _on_focus_in(self, e=None):
+        self._focused = True
+        self._draw()
+
+    def _on_focus_out(self, e=None):
+        self._focused = False
+        self._draw()
+
+    def _step(self, delta):
+        """左右/上下方向键在分段之间移动，等同于点击该段。"""
+        values = [value for _label, value in self._segments]
+        if not values:
+            return "break"
+        try:
+            index = values.index(self._var.get())
+        except ValueError:
+            index = 0
+        target = values[min(len(values) - 1, max(0, index + delta))]
+        if target != self._var.get():
+            self._var.set(target)
+            self._draw()
+            if self._command:
+                self._command()
+        return "break"
 
     def refresh(self):
         self._draw()
@@ -269,8 +349,13 @@ class PillSelect(tk.Canvas):
         self._values = values or []
         self._font = font
         self._enabled = True
+        self._focused = False
+        self.configure(takefocus=1)
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Button-1>", self._popup)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        bind_activation(self, self._on_key)
         self._var.trace_add("write", lambda *a: self._draw())
 
     def _draw(self):
@@ -291,6 +376,8 @@ class PillSelect(tk.Canvas):
         ay = h / 2
         self.create_line(ax - 4, ay - 2, ax, ay + 3, ax + 4, ay - 2,
                          fill=fg, width=1.6, capstyle="round", joinstyle="round")
+        if self._focused:
+            draw_focus_ring(self, w, h, (h - 2) / 2, c.ACCENT)
 
     def set_values(self, values):
         self._values = list(values)
@@ -298,9 +385,25 @@ class PillSelect(tk.Canvas):
 
     def set_enabled(self, enabled):
         self._enabled = enabled
+        if not enabled:
+            self._focused = False
+        self.configure(takefocus=1 if enabled else 0)
         self._draw()
 
-    def _popup(self, e):
+    def _on_focus_in(self, e=None):
+        self._focused = True
+        self._draw()
+
+    def _on_focus_out(self, e=None):
+        self._focused = False
+        self._draw()
+
+    def _on_key(self, e=None):
+        """键盘打开下拉：tk.Menu 自己支持方向键与回车选择、Esc 关闭。"""
+        self._popup(None)
+        return "break"
+
+    def _popup(self, e=None):
         if not self._enabled or not self._values:
             return
         menu = tk.Menu(self, tearoff=0)
@@ -407,9 +510,14 @@ class CheckPill(tk.Canvas):
         self._var = variable
         self._command = command
         self._font = font
+        self._focused = False
+        self.configure(takefocus=1)
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Button-1>", self._toggle)
         self.bind("<Enter>", lambda e: self.configure(cursor=hand_cursor()))
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        bind_activation(self, self._on_key)
 
     def _draw(self):
         self.delete("all")
@@ -431,6 +539,8 @@ class CheckPill(tk.Canvas):
                             fill=c.FIELD_BG, outline=c.CHECK_BORDER)
         self.create_text(b + 9, h / 2, text=self._text, fill=c.TEXT,
                          font=self._font, anchor="w")
+        if self._focused:
+            draw_focus_ring(self, w, h, 6, c.ACCENT)
 
     def set_checked(self, value):
         """程序化勾选/取消。
@@ -441,11 +551,23 @@ class CheckPill(tk.Canvas):
         self._var.set(bool(value))
         self._draw()
 
-    def _toggle(self, e):
+    def _toggle(self, e=None):
         self._var.set(not self._var.get())
         self._draw()
         if self._command:
             self._command()
+
+    def _on_focus_in(self, e=None):
+        self._focused = True
+        self._draw()
+
+    def _on_focus_out(self, e=None):
+        self._focused = False
+        self._draw()
+
+    def _on_key(self, e=None):
+        self._toggle()
+        return "break"
 
     def refresh(self):
         self._draw()
@@ -469,10 +591,28 @@ class LogoSwatch(tk.Canvas):
         self._font = font
         self._selected = False
         self._hover = False
+        self._focused = False
+        self.configure(takefocus=1)
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Button-1>", lambda e: self._command and self._command())
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        bind_activation(self, self._on_key)
+
+    def _on_focus_in(self, e=None):
+        self._focused = True
+        self._draw()
+
+    def _on_focus_out(self, e=None):
+        self._focused = False
+        self._draw()
+
+    def _on_key(self, e=None):
+        if self._command:
+            self._command()
+        return "break"
 
     def set_selected(self, selected):
         self._selected = bool(selected)
@@ -750,10 +890,28 @@ class SidebarItem(tk.Canvas):
         self._font = font
         self._active = False
         self._hover = False
+        self._focused = False
+        self.configure(takefocus=1)
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Button-1>", lambda e: self._command and self._command())
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        bind_activation(self, self._on_key)
+
+    def _on_focus_in(self, e=None):
+        self._focused = True
+        self._draw()
+
+    def _on_focus_out(self, e=None):
+        self._focused = False
+        self._draw()
+
+    def _on_key(self, e=None):
+        if self._command:
+            self._command()
+        return "break"
 
     def set_active(self, active):
         self._active = active

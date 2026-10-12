@@ -58,6 +58,22 @@ and a stale callback then raises `TclError: bad window path name`.
 
 GUI scripts such as `test_smoke_ui.py` require Tk; `test_core.py`, `test_images.py`, and several GUI flows use live services and may require valid URLs, login cookies, and network access. Use a dedicated test download directory and never include private URLs or cookies in fixtures.
 
+## Keyboard Support
+
+Custom Canvas widgets (`PillButton`, `CheckPill`, `SegmentedControl`, `PillSelect`,
+`SidebarItem`, `LogoSwatch`) are mouse-only unless they opt in. Each of them therefore
+sets `takefocus=1` (disabled states set it back to 0 so Tab never lands on something that
+cannot be clicked), binds `widgets.ACTIVATION_KEYS` (Return / keypad Enter / Space) through
+`widgets.bind_activation`, and draws `widgets.draw_focus_ring` while focused. The ring uses
+the widget's own foreground colour, which is guaranteed to contrast with its fill in both
+themes. Add the same four things to any new interactive widget; `test_keyboard.py` checks
+all of them, including that Tab from the URL field reaches a Canvas widget.
+
+Tk detail that bites when testing this: `widget.event_generate("<Return>")` only fires the
+binding when that widget **holds focus** — otherwise the key goes to the focused widget and
+nothing happens. Tests must call `focus_force()` first (the test window is usually not
+frontmost, so `focus_set()` is not enough).
+
 ## Commits and Pull Requests
 
 A global `commit-msg` hook (`~/.config/git/hooks/commit-msg`, enabled through
