@@ -18,9 +18,12 @@ class Palette:
     CARD_SHADOW: str     # 卡片柔和投影
     FIELD_BG: str        # 输入框内凹底色
     FIELD_BORDER: str
-    ACCENT: str          # 主操作蓝
+    ACCENT: str          # 主操作蓝（对勾、焦点环、进度条等非文字用途）
     ACCENT_HOVER: str
     ACCENT_DISABLED: str
+    ACCENT_FILL: str          # 实心按钮填充色：白字压在它上面，需满足 4.5:1
+    ACCENT_FILL_HOVER: str
+    PROGRESS_FILL: str   # 进度条填充：与轨道需满足 3:1（浅色要更深、深色要更亮）
     PILL_BG: str         # 次级胶囊按钮
     PILL_HOVER: str
     PILL_TEXT_DISABLED: str
@@ -46,17 +49,24 @@ LIGHT = Palette(
     CARD_BORDER="#FFFFFF",
     CARD_SHADOW="#D8DCE2",
     FIELD_BG="#F7F8FA",
-    FIELD_BORDER="#D9DEE5",
+    # 原为 #D9DEE5：与输入框底色只有 1.27，几乎看不出输入框在哪（需 3:1）
+    FIELD_BORDER="#828C9C",
     ACCENT="#0A84FF",
     ACCENT_HOVER="#0066D6",
     ACCENT_DISABLED="#A8C7EE",
+    # 填充按钮专用的蓝：会让白色标签压在上面，必须满足 4.5:1（白字 on #0A84FF
+    # 只有 3.65）。ACCENT 本身保留给对勾、焦点环、进度条这些非文字用途。
+    ACCENT_FILL="#0B73E2",
+    ACCENT_FILL_HOVER="#0066D6",
+    PROGRESS_FILL="#0B73E2",
     PILL_BG="#EEF0F3",
     PILL_HOVER="#E4E7EC",
     PILL_TEXT_DISABLED="#B3BAC9",
     TEXT="#1C1C1E",
     TEXT_SUB="#69717C",
-    ERROR="#D93025",
-    OK="#1E8E3E",
+    # 原为 #D93025 / #1E8E3E，on BG 只有 4.30 / 3.79，未达正文所需的 4.5
+    ERROR="#C5221F",
+    OK="#188038",
     TRACK="#DDE2E8",
     SEG_ACTIVE="#FFFFFF",
     SIDEBAR_BG="#E7EBF0",
@@ -65,7 +75,8 @@ LIGHT = Palette(
     SIDEBAR_TEXT="#56606D",
     SIDEBAR_TEXT_ACTIVE="#1C1C1E",
     THUMB_BG="#E3E7EC",
-    CHECK_BORDER="#BCC4CE",
+    # 原为 #BCC4CE：与复选框底色只有 1.66，勾选框边界不清
+    CHECK_BORDER="#828C9C",
 )
 
 DARK = Palette(
@@ -75,10 +86,15 @@ DARK = Palette(
     CARD_BORDER="#3A4150",
     CARD_SHADOW="#0B0C11",
     FIELD_BG="#2A2F3C",
-    FIELD_BORDER="#3A4150",
+    # 原为 #3A4150：与输入框底色只有 1.31，深色下要更亮才看得见边界（需 3:1）
+    FIELD_BORDER="#78829A",
     ACCENT="#0A84FF",
     ACCENT_HOVER="#3D9BFF",
     ACCENT_DISABLED="#27496F",
+    ACCENT_FILL="#0B73E2",
+    # 原为 #3D9BFF：白字只有 2.86（深色下悬停不该比填充更亮）
+    ACCENT_FILL_HOVER="#0A66C9",
+    PROGRESS_FILL="#3D9BFF",
     PILL_BG="#323848",
     PILL_HOVER="#3C4356",
     PILL_TEXT_DISABLED="#5B6273",
@@ -94,7 +110,8 @@ DARK = Palette(
     SIDEBAR_TEXT="#9AA3B5",
     SIDEBAR_TEXT_ACTIVE="#F2F3F7",
     THUMB_BG="#2A2F3C",
-    CHECK_BORDER="#4A5264",
+    # 原为 #4A5264：与复选框底色只有 1.71
+    CHECK_BORDER="#78829A",
 )
 
 _mode = "system"

@@ -151,6 +151,15 @@ class GlassCard(TFrame):
     def set_height(self, h):
         self._canvas.configure(height=h)
 
+    def sync_body(self):
+        """按当前画布尺寸同步内部 body 的高度（幂等）。
+
+        只在 <Configure> 里更新 body 是不够的：set_height 用的高度可能与画布当前
+        高度相同（缓存命中），那样不会产生 Configure，body 就停在旧高度把内容裁掉
+        （设置页在放大字号后实测 63 vs 需要 91）。调用方用这个入口确定性地同步。
+        """
+        self._redraw()
+
     def retheme(self):
         super().retheme()
         self._canvas.configure(bg=getattr(theme.C(), self._bg_role))
@@ -190,7 +199,8 @@ class PillButton(tk.Canvas):
         if self._primary:
             if self._state == "disabled":
                 return c.ACCENT_DISABLED, "#FFFFFF"
-            return (c.ACCENT_HOVER if self._hover else c.ACCENT), "#FFFFFF"
+            # 用 ACCENT_FILL 而不是 ACCENT：白字压在亮蓝上对比度只有 3.65
+            return (c.ACCENT_FILL_HOVER if self._hover else c.ACCENT_FILL), "#FFFFFF"
         if self._state == "disabled":
             return c.PILL_BG, c.PILL_TEXT_DISABLED
         return (c.PILL_HOVER if self._hover else c.PILL_BG), c.TEXT
@@ -487,9 +497,11 @@ class RoundProgress(tk.Canvas):
         draw_round_rect(self, 1, 1, w - 1, h - 1, r, fill=c.TRACK, outline="")
         fill_w = (w - 2) * self._value / 100.0
         if fill_w >= h:
-            draw_round_rect(self, 1, 1, 1 + fill_w, h - 1, r, fill=c.ACCENT, outline="")
+            draw_round_rect(self, 1, 1, 1 + fill_w, h - 1, r, fill=c.PROGRESS_FILL,
+                                outline="")
         elif fill_w > 2:
-            self.create_oval(1, 1, 1 + max(fill_w, h - 2), h - 1, fill=c.ACCENT, outline="")
+            self.create_oval(1, 1, 1 + max(fill_w, h - 2), h - 1, fill=c.PROGRESS_FILL,
+                             outline="")
 
     def retheme(self):
         self.configure(bg=getattr(theme.C(), self._bg_role))

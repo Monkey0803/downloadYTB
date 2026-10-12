@@ -46,7 +46,7 @@ Use Python 3 style, four-space indentation, descriptive `snake_case` functions a
 ## Testing Guidelines
 
 Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local changes. The offline suite is `test_i18n.py`, `test_save_dir_sync.py`, `test_weibo.py`, `test_browser_cookies.py`, `test_audio_options.py`, `test_windowing.py`, `test_diagnostics.py`, `test_shortcuts.py`, `test_platforms.py`, `test_dock.py`, `test_video_options.py`, `test_image_skip.py`, `test_video_panel.py`, `test_playlist.py`, `test_taskbar.py`, `test_taskbar_kde.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`,
-`test_release_notes.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, and `test_menubar.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
+`test_release_notes.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, `test_menubar.py`, `test_contrast.py`, and `test_font_scale.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
 hops back with `self.app.after(0, callback)`. That hop **requires a running
 `mainloop()`** — Tk raises `RuntimeError: main thread is not in main loop` when a
 non-main thread calls `after` while the main thread is only pumping `update()`, so a test
@@ -66,6 +66,30 @@ faked settings in tests never carry it — that keeps the modal welcome dialog f
 during a test run, where `wait_window()` would hang the suite instead of failing it.
 `App.needs_onboarding()` requires `_first_run` and an unset `onboarding_done`; dismissing the
 dialog (either button or the window close) persists `onboarding_done` exactly once.
+
+## Colours And Text Size
+
+`test_contrast.py` computes WCAG contrast for every text-on-background pair in both
+palettes and fails below 4.5:1 (normal text) or 3.0:1 (secondary text and non-text
+graphics). Disabled pairs are exempt per WCAG 1.4.3 but must be listed explicitly, and the
+test complains if an exempted pair starts passing.
+
+Two roles exist because one accent cannot serve both jobs: `ACCENT` is for non-text accents
+(checkmarks, focus rings) while `ACCENT_FILL` fills buttons whose label is white — white on
+`ACCENT` is only 3.65:1. `PROGRESS_FILL` is per-theme for the same reason (a progress bar
+must reach 3:1 against its own track, which needs a darker blue in light mode and a lighter
+one in dark mode).
+
+Text size is a stored scale (`font_scale`: standard/large/xlarge) applied in `_setup_fonts`.
+Changing it **rebuilds the interface**, because card heights and ellipsis widths are measured
+from the fonts. `GlassCard.sync_body()` exists for that: `set_height()` alone is not enough,
+since a height that happens to equal the canvas's current height produces no `<Configure>`
+event and leaves the inner body at its old size — silently clipping content (measured 63px
+body against 91px of content on the settings page).
+
+If a colour or font change seems not to apply, clear `app/__pycache__` first: a stale
+bytecode file once made the palette report the old values while the source was already
+correct.
 
 ## Menubar Tests And AppKit Ordering
 

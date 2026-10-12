@@ -28,6 +28,8 @@ DEFAULTS = {
     "window_geometry": "",
     # 首次使用的说明弹窗是否已经看过（看过就不再打扰）
     "onboarding_done": False,
+    # 界面字号：standard / large / xlarge
+    "font_scale": "standard",
     # 下载历史：最新的在前，最多 App.HISTORY_LIMIT 条（只保存路径等本地信息）
     "download_history": [],    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint

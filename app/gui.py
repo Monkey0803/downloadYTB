@@ -2155,6 +2155,10 @@ class SettingsPage(TFrame):
         f = app
         self._scroll_canvas = tk.Canvas(
             self, bg=theme.C().BG, highlightthickness=0, bd=0)
+        # 登记「按内容自适应高度」的卡片；必须在建第一张卡片之前就绪，
+        # 否则先 _track_card 后初始化会 AttributeError（真实踩过）
+        self._fit_cards = {}
+        self._card_heights = {}
         self._scrollbar = tk.Scrollbar(self, orient="vertical",
                                        command=self._scroll_canvas.yview)
         self._scroll_canvas.configure(yscrollcommand=self._scrollbar.set)
@@ -2182,6 +2186,8 @@ class SettingsPage(TFrame):
         card1.set_height(112)
         card1.pack(fill="x", pady=(0, 12))
         b1 = card1.body
+        # 加了字号行之后固定高度会裁切，交给按内容自适应（见 _track_card 说明）
+        self._track_card("appearance", card1, b1)
         TLabel(b1, text=i18n.tr("theme"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
         row1 = TFrame(b1, bg_role="CARD")
@@ -2199,11 +2205,33 @@ class SettingsPage(TFrame):
         self.theme_hint.pack(side="left", padx=(16, 0))
         self._update_theme_hint()
 
+        font_row = TFrame(b1, bg_role="CARD")
+        font_row.pack(fill="x", pady=(10, 0))
+        TLabel(font_row, text=i18n.tr("font_size"), font=f.f_body, bg_role="CARD",
+               fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+        # 变量存的是档位值（standard/large/xlarge）而不是显示标签：分段控件的
+        # 选项是 (label, value)，变量必须是 value，否则一个分段都匹配不上、
+        # 界面永远不会高亮当前档位（真实踩过）
+        self.font_scale_var = tk.StringVar(value=app.font_scale())
+        font_options = [(self._font_scale_label(v), v) for v in ("standard", "large",
+                                                                "xlarge")]
+        # 用变量 trace 而不是控件 command：程序化改动（含测试与回滚）同样会生效，
+        # 与剪贴板那一行保持一致
+        self.font_scale_var.trace_add("write", lambda *a: self._on_font_scale_change())
+        self.font_scale_seg = SegmentedControl(
+            font_row, font_options, self.font_scale_var, font=f.f_btn,
+            width=_segmented_width(f.f_btn, [t for t, _ in font_options]),
+            bg_role="CARD")
+        self.font_scale_seg.pack(side="left")
+        _pack_wrapped_hint(b1, app, i18n.tr("font_size_hint"), bg_role="CARD",
+                           pady=(6, 0))
+
         # —— 界面语言 ——
         card_language = GlassCard(self._scroll_body)
         card_language.set_height(104)
         card_language.pack(fill="x", pady=(0, 12))
         language_body = card_language.body
+        self._track_card("language", card_language, language_body)
         TLabel(language_body, text=i18n.tr("language"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         language_row = TFrame(language_body, bg_role="CARD")
@@ -2226,6 +2254,7 @@ class SettingsPage(TFrame):
         card_logo.set_height(216)
         card_logo.pack(fill="x", pady=(0, 12))
         bl = card_logo.body
+        self._track_card("logo", card_logo, bl)
         TLabel(bl, text=i18n.tr("app_logo"), font=f.f_section, bg_role="CARD",
                fg_role="TEXT_SUB").pack(anchor="w")
         logo_row = TFrame(bl, bg_role="CARD")
@@ -2250,6 +2279,7 @@ class SettingsPage(TFrame):
         card2.set_height(104)
         card2.pack(fill="x", pady=(0, 12))
         b2 = card2.body
+        self._track_card("save", card2, b2)
         TLabel(b2, text=i18n.tr("default_save"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         row2 = TFrame(b2, bg_role="CARD")
@@ -2268,8 +2298,6 @@ class SettingsPage(TFrame):
         card3.set_height(310)
         card3.pack(fill="x", pady=(0, 12))
         b3 = card3.body
-        self._fit_cards = {}
-        self._card_heights = {}
         TLabel(b3, text=i18n.tr("browser_cookie"), font=f.f_section,
                bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
         row3 = TFrame(b3, bg_role="CARD")
@@ -2510,6 +2538,9 @@ class SettingsPage(TFrame):
         if needed != self._card_heights.get(name):
             self._card_heights[name] = needed
             card.set_height(needed)
+        # 高度没变时也要同步一次：set_height 设的值若与画布当前高度相同就不会有
+        # <Configure>，body 会停在旧高度把内容裁掉（sync_body 是幂等的）。
+        card.sync_body()
 
     def _fit_cookie_card(self):
         self._fit_card("cookie")
@@ -2727,6 +2758,16 @@ class SettingsPage(TFrame):
         self.app.settings["platform_cookies"] = mapping
         settings.save(self.app.settings)
         browser_cookies.set_platform_overrides(mapping)
+
+    def _font_scale_label(self, value):
+        return i18n.tr({"large": "font_large",
+                        "xlarge": "font_xlarge"}.get(value, "font_standard"))
+
+    def _on_font_scale_change(self):
+        value = self.font_scale_var.get()
+        if not self.app.set_font_scale(value):
+            # 被拒绝（下载中）或与当前一致：把选择回滚到实际生效的档位
+            self.font_scale_var.set(self.app.font_scale())
 
     def _clipboard_action_label(self, value):
         return i18n.tr({
@@ -3196,19 +3237,52 @@ class App(tk.Tk):
 
     # ---------- 字体 ----------
 
+    # 字号档位 -> 缩放系数。只做整数像素取整，避免半像素字发虚。
+    FONT_SCALES = {"standard": 1.0, "large": 1.15, "xlarge": 1.3}
+    # 各字体的基准字号
+    FONT_BASES = (("f_title", 22, "bold"), ("f_sub", 12, ""), ("f_section", 12, "bold"),
+                  ("f_body", 13, ""), ("f_body_bold", 13, "bold"), ("f_btn", 13, ""),
+                  ("f_btn_big", 15, "bold"), ("f_small", 11, ""), ("f_side", 13, ""),
+                  ("f_side_title", 16, "bold"))
+
+    def font_scale(self):
+        """当前字号档位，非法值回退到标准。"""
+        value = str(self.settings.get("font_scale", "standard") or "").strip().lower()
+        return value if value in self.FONT_SCALES else "standard"
+
+    def _font_size(self, base):
+        return max(9, round(base * self.FONT_SCALES[self.font_scale()]))
+
     def _setup_fonts(self):
         base = tkfont.nametofont("TkDefaultFont")
         family = base.actual("family")
-        self.f_title = tkfont.Font(family=family, size=22, weight="bold")
-        self.f_sub = tkfont.Font(family=family, size=12)
-        self.f_section = tkfont.Font(family=family, size=12, weight="bold")
-        self.f_body = tkfont.Font(family=family, size=13)
-        self.f_body_bold = tkfont.Font(family=family, size=13, weight="bold")
-        self.f_btn = tkfont.Font(family=family, size=13)
-        self.f_btn_big = tkfont.Font(family=family, size=15, weight="bold")
-        self.f_small = tkfont.Font(family=family, size=11)
-        self.f_side = tkfont.Font(family=family, size=13)
-        self.f_side_title = tkfont.Font(family=family, size=16, weight="bold")
+        for attr, size, weight in self.FONT_BASES:
+            setattr(self, attr, tkfont.Font(
+                family=family, size=self._font_size(size), weight=weight or "normal"))
+
+    def set_font_scale(self, value):
+        """切换界面字号并重建界面；下载进行中不打断任务。
+
+        重建是必要的：卡片高度、省略号宽度都是按字体量出来的，只改字体对象
+        而不重建，布局会留着旧尺寸（GlassCard 还会把内容裁掉）。
+        """
+        value = value if value in self.FONT_SCALES else "standard"
+        if value == self.font_scale():
+            return False
+        if any(getattr(panel, "_busy", False) for panel in self._all_panels()):
+            messagebox.showinfo(i18n.tr("font_size"), i18n.tr("language_busy"),
+                                parent=self)
+            return False
+        current_page = self.current_page or "youtube"
+        self.settings["font_scale"] = value
+        settings.save(self.settings)
+        for child in (getattr(self, "sidebar", None), getattr(self, "content", None)):
+            if child is not None:
+                child.destroy()
+        self._setup_fonts()
+        self._build_layout()
+        self.show_page(current_page)
+        return True
 
     # ---------- 布局 ----------
 
