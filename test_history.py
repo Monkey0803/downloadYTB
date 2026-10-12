@@ -6,6 +6,7 @@
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -117,6 +118,54 @@ class HistoryDataTests(unittest.TestCase):
         gui.App.clear_history(app)
         self.assertEqual(app.settings["download_history"], [])
         self.assertEqual(len(self.saved), 1)
+
+
+class HistoryPersistenceTests(unittest.TestCase):
+    """跨重启保留：真实读写 settings 文件，确认历史真的留下来了。
+
+    这里必须显式换回**真实**的 settings.load：同一个文件里的 GUI 用例会调用
+    _shared_app()，而它把 settings.load 换成了内存里的假实现且不还原。不换回来
+    的话本类会「读到默认值」，看起来像持久化失效，实际是测试自己没读文件。
+    """
+
+    def setUp(self):
+        self.tempdir = tempfile.mkdtemp()
+        self._path = settings_mod.SETTINGS_PATH
+        self._save = settings_mod.save
+        self._load = settings_mod.load
+        settings_mod.SETTINGS_PATH = os.path.join(self.tempdir, "settings.json")
+        settings_mod.load = _ORIGINAL_LOAD
+        settings_mod.save = _ORIGINAL_SAVE
+
+    def tearDown(self):
+        settings_mod.SETTINGS_PATH = self._path
+        settings_mod.save = self._save
+        settings_mod.load = self._load
+        shutil.rmtree(self.tempdir, ignore_errors=True)
+
+    def test_history_survives_a_real_reload(self):
+        app = _FakeApp(settings_mod.load())
+        gui.App.record_download(app, ["/tmp/保留的文件.mp4"], title="保留标题",
+                                platform="X", timestamp=1234)
+        reloaded = settings_mod.load()
+        entries = reloaded["download_history"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["path"], "/tmp/保留的文件.mp4")
+        self.assertEqual(entries[0]["title"], "保留标题")
+        self.assertEqual(entries[0]["platform"], "X")
+        self.assertEqual(entries[0]["time"], 1234)
+
+    def test_cleared_history_stays_cleared(self):
+        app = _FakeApp(settings_mod.load())
+        gui.App.record_download(app, ["/tmp/a.mp4"], timestamp=1)
+        gui.App.clear_history(app)
+        self.assertEqual(settings_mod.load()["download_history"], [])
+
+    def test_other_settings_are_not_wiped(self):
+        app = _FakeApp(settings_mod.load())
+        app.settings["language"] = "en"
+        gui.App.record_download(app, ["/tmp/a.mp4"], timestamp=1)
+        self.assertEqual(settings_mod.load()["language"], "en")
 
 
 class OpenPathTests(unittest.TestCase):
