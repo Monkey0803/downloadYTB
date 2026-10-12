@@ -46,7 +46,7 @@ Use Python 3 style, four-space indentation, descriptive `snake_case` functions a
 ## Testing Guidelines
 
 Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local changes. The offline suite is `test_i18n.py`, `test_save_dir_sync.py`, `test_weibo.py`, `test_browser_cookies.py`, `test_audio_options.py`, `test_windowing.py`, `test_diagnostics.py`, `test_shortcuts.py`, `test_platforms.py`, `test_dock.py`, `test_video_options.py`, `test_image_skip.py`, `test_video_panel.py`, `test_playlist.py`, `test_taskbar.py`, `test_taskbar_kde.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`,
-`test_release_notes.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, and `test_onboarding.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
+`test_release_notes.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, and `test_menubar.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
 hops back with `self.app.after(0, callback)`. That hop **requires a running
 `mainloop()`** — Tk raises `RuntimeError: main thread is not in main loop` when a
 non-main thread calls `after` while the main thread is only pumping `update()`, so a test
@@ -66,6 +66,20 @@ faked settings in tests never carry it — that keeps the modal welcome dialog f
 during a test run, where `wait_window()` would hang the suite instead of failing it.
 `App.needs_onboarding()` requires `_first_run` and an unset `onboarding_done`; dismissing the
 dialog (either button or the window close) persists `onboarding_done` exactly once.
+
+## Menubar Tests And AppKit Ordering
+
+`test_menubar.py` exercises the real `NSStatusBar`/`NSMenu` code (the only place pyobjc is
+used), because that module's past bug was index-based menu updates. Two things to know:
+
+- **Tk must be initialised before any pyobjc AppKit object is created.** If a test creates
+  an `NSStatusItem` first and a Tk root afterwards, Tk's init aborts the process with
+  `-[NSApplication macOSVersion]: unrecognized selector` (SIGABRT, reproduced here). The real
+  app has the right order — Tk's mainloop runs first, the menubar is created later — so the
+  test file creates its shared `App` in `setUpClass` before building any status item.
+- Menu items are indexed by **action name** (`controller._items[action]`), never by position.
+  A positional `itemAtIndex_(2)` update silently translates the wrong rows once an item is
+  added; `test_menubar.py` asserts a full language switch instead.
 
 ## Keyboard Support
 
