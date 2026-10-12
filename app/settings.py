@@ -31,7 +31,10 @@ DEFAULTS = {
     # 界面字号：standard / large / xlarge
     "font_scale": "standard",
     # 下载历史：最新的在前，最多 App.HISTORY_LIMIT 条（只保存路径等本地信息）
-    "download_history": [],    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
+    "download_history": [],
+    # 下载队列：最新的排在后面，逐项执行；只存 URL 与平台
+    "download_queue": [],
+    "queue_autostart": True,    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint
 }
 

@@ -730,6 +730,10 @@ class VideoPanel(TFrame):
         self.download_btn = PillButton(btn_row, i18n.tr("start_download"), command=self._on_download_btn,
                                        primary=True, font=f.f_btn_big, height=46)
         self.download_btn.pack(side="left", fill="x", expand=True)
+        self.queue_btn = PillButton(btn_row, i18n.tr("queue_add"),
+                                    command=self.on_enqueue, font=f.f_btn, width=104,
+                                    height=46)
+        self.queue_btn.pack(side="right", padx=(10, 0))
         self.cancel_btn = PillButton(btn_row, i18n.tr("cancel"), command=self.on_cancel,
                                      font=f.f_btn, width=88, height=46)
         # 取消按钮仅在下载中/暂停时显示
@@ -1433,6 +1437,7 @@ class VideoPanel(TFrame):
         self.download_btn.configure_state("normal")
         self.cancel_btn.pack_forget()
         self.probe_btn.configure_state("normal")
+        self.app.notify_download_finished()
 
     def _download_cancelled(self):
         self._reset_after_download()
@@ -1467,6 +1472,15 @@ class VideoPanel(TFrame):
 
     def on_open_folder(self):
         open_in_file_manager(self._last_file)
+
+    def on_enqueue(self):
+        """把当前链接加入队列（选项不冻结，执行时用当时的设置）。"""
+        url = self.url_entry.get().strip()
+        if not url:
+            self._set_status(i18n.tr("queue_need_link"), error=True)
+            return
+        self.app.enqueue_url(url)
+        self._set_status(i18n.tr("queue_added", url=url), ok=True)
 
     def on_open_file(self):
         path = self._last_file
@@ -1871,6 +1885,7 @@ class ImagePanel(TFrame):
         self.cancel_btn.pack_forget()
         self.probe_btn.configure_state("normal")
         self._on_selection_change()
+        self.app.notify_download_finished()
 
     def _download_cancelled(self):
         done = len(self._last_paths)
@@ -2045,6 +2060,119 @@ class MediaPlatformPage(TFrame):
             self.show_kind("video")
         panel = self.video_panel if self.kind_var.get() == "video" else self.image_panel
         panel.handle_url(url)
+
+
+class QueuePage(TFrame):
+    """下载队列：列出待下载的链接，可移除、清空、立即开始下一个。
+
+    队列只保存 **URL 与平台**，不冻结清晰度/字幕/保存位置——执行时用的是当时的
+    设置。这样队列不必理解每个面板的选项状态，也就不会把核心下载流程卷进来；
+    语义写在页面提示里，避免用户误以为选项会被记住。
+    """
+
+    MAX_ROWS = 50
+
+    def __init__(self, master, app):
+        super().__init__(master, bg_role="BG")
+        self.app = app
+        canvas = tk.Canvas(self, bg=theme.C().BG, highlightthickness=0, bd=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self._body = TFrame(canvas, bg_role="BG")
+        window = canvas.create_window((0, 0), window=self._body, anchor="nw")
+        self._body.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind(
+            "<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+
+        header = TFrame(self._body, bg_role="BG")
+        header.pack(fill="x", pady=(0, 14))
+        PageHeader(header, app, i18n.tr("queue"),
+                   i18n.tr("queue_subtitle")).pack(side="left", fill="x", expand=True)
+        self.start_btn = PillButton(header, i18n.tr("queue_start"),
+                                    command=self._on_start_next, primary=True,
+                                    font=app.f_btn, width=118, bg_role="BG")
+        self.start_btn.pack(side="right")
+        self.clear_btn = PillButton(header, i18n.tr("queue_clear"),
+                                    command=self._on_clear, font=app.f_btn, width=110,
+                                    bg_role="BG")
+        self.clear_btn.pack(side="right", padx=(0, 8))
+
+        toggle_row = TFrame(self._body, bg_role="BG")
+        toggle_row.pack(fill="x", pady=(0, 10))
+        self.autostart_var = tk.BooleanVar(value=app.queue_autostart_enabled())
+        check = i18n.tr("queue_autostart")
+        CheckPill(toggle_row, check, self.autostart_var,
+                  command=self._on_autostart_change, font=app.f_btn, bg_role="BG",
+                  width=_check_pill_width(app.f_btn, check)).pack(side="left")
+
+        self.rows = TFrame(self._body, bg_role="BG")
+        self.rows.pack(fill="both", expand=True)
+        self.refresh()
+
+    def on_shown(self):
+        self.refresh()
+
+    def refresh(self):
+        for child in self.rows.winfo_children():
+            child.destroy()
+        items = self.app.queue_items()[:self.MAX_ROWS]
+        has_items = bool(items)
+        self.start_btn.configure_state("normal" if has_items else "disabled")
+        self.clear_btn.configure_state("normal" if has_items else "disabled")
+        self.autostart_var.set(self.app.queue_autostart_enabled())
+        if not items:
+            card = GlassCard(self.rows)
+            card.set_height(112)
+            card.pack(fill="x")
+            TLabel(card.body, text=i18n.tr("queue_empty"), font=self.app.f_section,
+                   bg_role="CARD").pack(anchor="w")
+            _pack_wrapped_hint(card.body, self.app, i18n.tr("queue_empty_hint"),
+                               bg_role="CARD", pady=(6, 0))
+            return
+        for index, item in enumerate(items):
+            self._build_row(index, item)
+
+    def _build_row(self, index, item):
+        card = GlassCard(self.rows)
+        # 实测内容需要 95px，而 126 的卡片只给出 93px，会裁掉一点（同历史页的坑）
+        card.set_height(132)
+        card.pack(fill="x", pady=(0, 10))
+        TLabel(card.body, text=ellipsize(str(item.get("url") or ""), self.app.f_body,
+                                        520),
+               font=self.app.f_body, bg_role="CARD", anchor="w").pack(
+            anchor="w", fill="x")
+        meta = [i18n.tr("queue") + f" {index + 1}",
+                str(item.get("platform") or "")]
+        TLabel(card.body, text="　·　".join(bit for bit in meta if bit),
+               font=self.app.f_small, bg_role="CARD", fg_role="TEXT_SUB",
+               anchor="w").pack(anchor="w", fill="x", pady=(2, 8))
+        PillButton(card.body, i18n.tr("queue_remove"),
+                   command=lambda i=index: self._on_remove(i), font=self.app.f_btn,
+                   width=96, bg_role="CARD").pack(anchor="w")
+
+    def _on_remove(self, index):
+        items = self.app.queue_items()
+        if 0 <= index < len(items):
+            items.pop(index)
+            self.app.set_queue_items(items)
+
+    def _on_start_next(self):
+        self.app.advance_queue(force=True)
+
+    def _on_autostart_change(self):
+        self.app.set_queue_autostart(bool(self.autostart_var.get()))
+
+    def _on_clear(self):
+        if not self.app.queue_items():
+            return
+        if not messagebox.askyesno(i18n.tr("queue"),
+                                   i18n.tr("queue_clear_confirm"), parent=self.app):
+            return
+        self.app.clear_queue()
 
 
 class HistoryPage(TFrame):
@@ -2913,6 +3041,17 @@ def open_in_file_manager(path):
         subprocess.Popen(["xdg-open", os.path.dirname(path)])
 
 
+def _refresh_queue_page_safe(app):
+    """刷新队列页（页面可能还没建好或已销毁）。"""
+    page = getattr(app, "pages", {}).get("queue")
+    refresh = getattr(page, "refresh", None)
+    if callable(refresh):
+        try:
+            refresh()
+        except tk.TclError:
+            pass
+
+
 def open_path(path):
     """用系统默认程序打开文件本身（而不是在文件管理器里定位它）。"""
     if not path:
@@ -2997,6 +3136,94 @@ class App(tk.Tk):
         # 首次安装才弹说明；延迟一点让主窗口先画出来
         self.after(self.ONBOARDING_DELAY_MS, self._maybe_show_welcome)
         self.bind("<FocusIn>", self._on_focus_in)
+
+    # ---------- 下载队列 ----------
+
+    QUEUE_LIMIT = 50
+
+    def queue_items(self):
+        """待下载的链接，按加入顺序。脏数据一律跳过，避免整页打不开。"""
+        entries = self.settings.get("download_queue")
+        if not isinstance(entries, list):
+            return []
+        return [e for e in entries if isinstance(e, dict) and e.get("url")]
+
+    def set_queue_items(self, items):
+        self.settings["download_queue"] = list(items)[-self.QUEUE_LIMIT:]
+        settings.save(self.settings)
+        self._refresh_queue_page()
+
+    def enqueue_url(self, url, platform=""):
+        """把链接加入队列；只存 URL 与平台，不冻结选项（见 QueuePage 说明）。"""
+        url = (url or "").strip()
+        if not url:
+            return False
+        items = self.queue_items()
+        items.append({"url": url, "platform": platform or detect_platform(url)})
+        self.set_queue_items(items)
+        return True
+
+    def dequeue_item(self, index=0):
+        items = self.queue_items()
+        if not items or not 0 <= index < len(items):
+            return None
+        item = items.pop(index)
+        self.set_queue_items(items)
+        return item
+
+    def clear_queue(self):
+        self.set_queue_items([])
+
+    def queue_autostart_enabled(self):
+        return bool(self.settings.get("queue_autostart", True))
+
+    def set_queue_autostart(self, enabled):
+        self.settings["queue_autostart"] = bool(enabled)
+        settings.save(self.settings)
+
+    def notify_download_finished(self):
+        """面板结束一次下载：稍后推进队列。
+
+        必须延后：在面板自己的复位流程里直接再发起下载会重入，状态会互相踩。
+        """
+        self.after(200, self.advance_queue)
+
+    def advance_queue(self, force=False):
+        """执行队列里的下一个任务，返回是否真的取了任务。
+
+        force=True 用于「开始下一个」按钮：忽略自动继续开关。任意面板忙碌时都
+        不取任务，免得两个下载互相抢进度条。
+        """
+        if not force and not self.queue_autostart_enabled():
+            return False
+        if any(getattr(panel, "_busy", False) for panel in self._all_panels()):
+            return False
+        item = self.dequeue_item(0)
+        if item is None:
+            return False
+        url = str(item.get("url") or "")
+        page = self.pages.get(item.get("platform") or detect_platform(url))
+        if page is None:
+            return False
+        if getattr(page, "kind_var", None) is not None:
+            page.kind_var.set("video")       # 队列里排的都是视频链接
+        panel = _active_panel(page)
+        if panel is None or not hasattr(panel, "on_download"):
+            return False
+        self.show_page(self._page_key(page))
+        panel.url_entry.set(url)
+        panel.on_download()
+        _refresh_queue_page_safe(self)
+        return True
+
+    def _page_key(self, page):
+        for key, candidate in self.pages.items():
+            if candidate is page:
+                return key
+        return self.current_page
+
+    def _refresh_queue_page(self):
+        _refresh_queue_page_safe(self)
 
     # ---------- 下载历史 ----------
 
@@ -3342,6 +3569,7 @@ class App(tk.Tk):
                 self.page_holder, self, i18n.tr("weibo_title"),
                 i18n.tr("weibo_subtitle"), platform="微博",
                 hint=i18n.tr("weibo_hint"), show_kind_switch=False),
+            "queue": QueuePage(self.page_holder, self),
             "history": HistoryPage(self.page_holder, self),
             "settings": SettingsPage(self.page_holder, self),
         }
@@ -3372,6 +3600,12 @@ class App(tk.Tk):
                                    font=self.f_side)
         history_item.pack(side="bottom", padx=12, pady=2)
         self.nav_items["history"] = history_item
+
+        queue_item = SidebarItem(self.sidebar, i18n.tr("queue"), "queue",
+                                 command=lambda: self.show_page("queue"),
+                                 font=self.f_side)
+        queue_item.pack(side="bottom", padx=12, pady=2)
+        self.nav_items["queue"] = queue_item
 
         self.current_page = None
 

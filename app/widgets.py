@@ -887,7 +887,7 @@ class ImagePicker(tk.Frame):
 
 class SidebarItem(tk.Canvas):
     """侧边栏条目：圆角高亮 + 品牌色平台 Logo + 文字。icon 取值
-    youtube / x / instagram / douyin / bilibili / weibo / history / settings。
+    youtube / x / instagram / douyin / bilibili / weibo / queue / history / settings。
 
     未知取值不会报错，只是不画图标；新增入口时记得在这里补一个分支。
     """
@@ -1019,6 +1019,13 @@ class SidebarItem(tk.Canvas):
                              fill="#FFFFFF", outline="")
             self.create_oval(cx - 1.5, cy - 2.5, cx + 2.5, cy + 2.5,
                              fill=red, outline="")
+        elif self._icon == "queue":
+            # 列表：三条横线，每行左侧一个小方点
+            for offset in (-5, 0, 5):
+                self.create_oval(cx - 9, cy + offset - 1.6, cx - 5.8, cy + offset + 1.6,
+                                 fill=fg, outline="")
+                self.create_line(cx - 2.5, cy + offset, cx + 8, cy + offset, fill=fg,
+                                 width=2, capstyle="round")
         elif self._icon == "history":
             # 时钟：外圈 + 时针分针，表示「历史」
             import math
