@@ -26,6 +26,8 @@ DEFAULTS = {
     "clipboard_action": "suggest",
     "subtitle_langs": "",     # 逗号分隔的字幕语言；空表示用代码内默认值
     "window_geometry": "",
+    # 首次使用的说明弹窗是否已经看过（看过就不再打扰）
+    "onboarding_done": False,
     # 下载历史：最新的在前，最多 App.HISTORY_LIMIT 条（只保存路径等本地信息）
     "download_history": [],    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint
@@ -47,6 +49,7 @@ SETTINGS_PATH = os.path.join(_settings_dir(), "settings.json")
 def load() -> dict:
     data = dict(DEFAULTS)
     data["save_dirs"] = dict(DEFAULTS["save_dirs"])
+    stored = None
     try:
         with open(SETTINGS_PATH, encoding="utf-8") as f:
             stored = json.load(f)
@@ -59,6 +62,12 @@ def load() -> dict:
                 data["save_dirs"] = {}
     except (OSError, ValueError):
         pass
+    # 「全新安装」：按**文件是否存在**判断，而不是能否解析——文件在但内容损坏的
+    # 用户不是新用户，不该再被首次使用说明打扰（那种情况本来就按默认值继续跑）。
+    # 这个键**不在 DEFAULTS 里**，所以不会被 save() 写进文件，只在内存里用于决定
+    # 要不要弹首次使用说明；测试里假造的 settings 也不会有它，因此模态弹窗永远
+    # 不会在测试中冒出来挡住事件循环。
+    data["_first_run"] = not os.path.exists(SETTINGS_PATH)
     return data
 
 

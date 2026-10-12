@@ -127,6 +127,73 @@ def download_dir_key(platform: str, kind: str) -> str:
 # ====================================================================
 
 
+class WelcomeDialog(tk.Toplevel):
+    """首次使用的说明（#9）。
+
+    新用户面对一个空输入框，并不知道「解析 → 选清晰度 → 开始下载」这条流程，
+    也不知道图片类平台常需要登录态。做成一次性弹窗而不是常驻卡片：面板的卡片
+    高度是写死的，常驻卡片会把「开始下载」挤出可视区域。
+    """
+
+    WIDTH = 560
+
+    def __init__(self, master, app, on_dismiss=None):
+        super().__init__(master)
+        self.app = app
+        self._on_dismiss = on_dismiss
+        self._fired_dismiss = False
+        self.title(i18n.tr("welcome_title"))
+        self.configure(bg=theme.C().BG)
+        self.transient(master.winfo_toplevel())
+        self.resizable(False, False)
+
+        outer = TFrame(self, bg_role="BG")
+        outer.pack(fill="both", expand=True, padx=20, pady=18)
+        TLabel(outer, text=i18n.tr("welcome_title"), font=app.f_section,
+               bg_role="BG").pack(anchor="w")
+        steps = TFrame(outer, bg_role="BG")
+        steps.pack(fill="x", pady=(10, 6))
+        for key in ("welcome_step_1", "welcome_step_2", "welcome_step_3"):
+            TLabel(steps, text=i18n.tr(key), font=app.f_body, bg_role="BG",
+                   anchor="w", justify="left", wraplength=self.WIDTH - 60).pack(
+                anchor="w", fill="x", pady=2)
+        _pack_wrapped_hint(outer, app, i18n.tr("welcome_tip"), bg_role="BG",
+                           pady=(4, 12))
+
+        buttons = TFrame(outer, bg_role="BG")
+        buttons.pack(fill="x")
+        PillButton(buttons, i18n.tr("settings"), command=lambda: self._finish(True),
+                   font=app.f_btn, width=110, bg_role="BG").pack(side="left")
+        PillButton(buttons, i18n.tr("welcome_go"), command=self._finish, primary=True,
+                   font=app.f_btn, width=110, bg_role="BG").pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self._finish)
+        self._center_on(master)
+
+    def _center_on(self, master):
+        try:
+            self.update_idletasks()
+            x = master.winfo_rootx() + max(20, (master.winfo_width() - self.WIDTH) // 2)
+            y = master.winfo_rooty() + 90
+            self.geometry(f"{self.WIDTH}+{max(0, x)}+{max(0, y)}")
+        except tk.TclError:
+            pass
+
+    def _finish(self, open_settings=False):
+        """无论「开始使用」「打开设置」还是直接关窗口，都算看过了。"""
+        if not self._fired_dismiss:
+            self._fired_dismiss = True
+            if callable(self._on_dismiss):
+                self._on_dismiss()
+        if open_settings:
+            self.app.show_page("settings")
+        self.destroy()
+
+    def show(self):
+        self.grab_set()
+        self.wait_window(self)
+
+
 class TextDetailDialog(tk.Toplevel):
     """完整显示被状态栏截断的文本（#3）。
 
@@ -2886,6 +2953,8 @@ class App(tk.Tk):
             self.after(150, self._poll_menubar)
 
         self.after(300, self._check_clipboard)
+        # 首次安装才弹说明；延迟一点让主窗口先画出来
+        self.after(self.ONBOARDING_DELAY_MS, self._maybe_show_welcome)
         self.bind("<FocusIn>", self._on_focus_in)
 
     # ---------- 下载历史 ----------
@@ -2925,6 +2994,24 @@ class App(tk.Tk):
 
     def clear_history(self):
         self.settings["download_history"] = []
+        settings.save(self.settings)
+
+    # ---------- 首次使用说明 ----------
+
+    ONBOARDING_DELAY_MS = 600
+
+    def needs_onboarding(self):
+        """只有「全新安装」（还没有设置文件）且没看过说明时才需要引导。"""
+        return bool(self.settings.get("_first_run")) and not bool(
+            self.settings.get("onboarding_done"))
+
+    def _maybe_show_welcome(self):
+        if not self.needs_onboarding():
+            return
+        WelcomeDialog(self, self, on_dismiss=self._finish_onboarding).show()
+
+    def _finish_onboarding(self):
+        self.settings["onboarding_done"] = True
         settings.save(self.settings)
 
     def dock_status_enabled(self):
