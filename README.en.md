@@ -29,7 +29,7 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - A video thumbnail preview appears after probing, so you can confirm the video before downloading.
 - Re-downloading the same image post skips existing files instead of creating numbered copies (can be turned off in Settings).
 - Playlist and channel links are supported: after probing you are told "this is a playlist with N items" and can pick the current video only, the first 10/25/50, or all of them (the default is the current video only, so a whole channel is never downloaded by accident).
-- Any items in a probed playlist can be ticked for batch download (within the first 100 listed), and files are named "index - title" so they sort correctly.
+- Any items in a probed playlist can be ticked for batch download; use "Load more" to extend the list 100 entries at a time, and files are named "index - title" so they sort correctly.
 - Clipboard links only "ask first" by default: after copying a link, switching back to the app just shows a bar at the top instead of replacing what you were typing (configurable in Settings).
 - Truncated status-line errors can be clicked to read in full and copy in one click.
 - Subtitle languages can be ticked from a list instead of typing yt-dlp language codes.

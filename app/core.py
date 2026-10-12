@@ -33,6 +33,9 @@ DEFAULT_SUBTITLE_LANGS = ("zh-Hans", "zh-Hant", "en")
 # 播放列表：解析阶段只做「扁平 + 限量」抽取。实测一个 5300 条的频道，
 # 不限量的扁平抽取要 56 秒、非扁平超过 200 秒仍不返回；限量 100 只要 1.6 秒。
 PLAYLIST_PREVIEW_LIMIT = 100
+# 「加载更多」每次多探测多少条。实测限量 100 的扁平抽取约 1.6 秒，所以按 100
+# 递增可以在「等太久」和「点太多次」之间取平衡。
+PLAYLIST_LOAD_STEP = 100
 PLAYLIST_LIMIT_ALL = 0           # 0 = 整个播放列表
 # 界面提供的条数选项（1 表示只下载当前视频，保持历史行为）
 PLAYLIST_LIMITS = (1, 10, 25, 50, PLAYLIST_LIMIT_ALL)
@@ -302,13 +305,18 @@ def _has_usable_formats(info: dict) -> bool:
     return False
 
 
-def probe(url: str) -> VideoInfo:
+def probe(url: str, preview_limit: int = PLAYLIST_PREVIEW_LIMIT) -> VideoInfo:
     """解析视频信息（不下载），返回标题、时长与可用清晰度列表。
 
     启用浏览器 Cookie 且没有可用 JS 运行时时，YouTube 可能只返回
     storyboard 预览图；此时自动降级为匿名解析重试一次（匿名可用
     android_vr 等无需 JS 的客户端）。
+
+    ``preview_limit`` 是播放列表扁平抽取的条目上限（供选择器「加载更多」逐次
+    放大）。下载不受它限制：指定条目时用的是 ``playlist_items``，不带
+    ``playlistend``。
     """
+    preview_limit = max(1, int(preview_limit or PLAYLIST_PREVIEW_LIMIT))
     url = (url or "").strip()
     if not url:
         raise DownloadError(i18n.tr("enter_video_link"))
@@ -332,11 +340,11 @@ def probe(url: str) -> VideoInfo:
         # 走到下面的播放列表分支。
         opts.update({
             "extract_flat": "in_playlist",
-            "playlistend": PLAYLIST_PREVIEW_LIMIT,
+            "playlistend": preview_limit,
         })
         return opts
 
-    def resolve(raw):
+    def resolve(raw, limit=preview_limit):
         """把（可能是播放列表的）解析结果规整为 (视频 info, 播放列表元信息)。
 
         扁平条目没有 formats，所以再完整解析第一个条目，界面的清晰度下拉才有
@@ -351,7 +359,7 @@ def probe(url: str) -> VideoInfo:
         meta = (
             raw.get("title") or "",
             len(entries),
-            len(entries) >= PLAYLIST_PREVIEW_LIMIT,
+            len(entries) >= limit,
             [(e.get("title") or "").strip() for e in entries],
             entries[0],
         )

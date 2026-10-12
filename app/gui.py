@@ -312,23 +312,28 @@ class SubtitleLanguagePicker(tk.Toplevel):
 class EntryPicker(tk.Toplevel):
     """播放列表条目批量选择弹窗（#2）。
 
-    探针只会拿到前 PLAYLIST_PREVIEW_LIMIT 条，所以这里列表的长度就是可选上限，
-    弹窗本身不再发起任何网络请求。
+    探针一次只取 PLAYLIST_PREVIEW_LIMIT 条（限量扁平抽取才够快），列表不够用时
+    由「加载更多」按 core.PLAYLIST_LOAD_STEP 逐次放大上限。弹窗自己不发请求：
+    它只调用外部传入的 on_request_more，由调用方在后台线程探测后再回调
+    set_items——这样弹窗仍然可以在单测里直接驱动，不会被模态 wait_window 挂住。
 
-    刻意把「构建」「取值」「确认」拆开，show() 之外都能在单测里直接调用，
-    否则模态对话框（wait_window）会把测试挂住。
+    刻意把「构建」「取值」「确认」拆开，show() 之外都能在单测里直接调用。
     """
 
     WIDTH = 620
     HEIGHT = 540
     ROW_PADY = 2
 
-    def __init__(self, master, app, titles, selected=None):
+    def __init__(self, master, app, titles, selected=None, truncated=False,
+                 on_request_more=None):
         super().__init__(master)
         self.app = app
         self._titles = list(titles)
         self._pills = []
         self.result = None
+        self._truncated = bool(truncated)
+        self._on_request_more = on_request_more
+        self._loading = False
         chosen = {int(i) for i in (selected or []) if str(i).strip().isdigit()}
 
         self.title(i18n.tr("pick_entries_title"))
@@ -340,8 +345,11 @@ class EntryPicker(tk.Toplevel):
         outer.pack(fill="both", expand=True, padx=14, pady=12)
         TLabel(outer, text=i18n.tr("pick_entries_title"), font=app.f_section,
                bg_role="BG").pack(anchor="w")
-        _pack_wrapped_hint(outer, app, i18n.tr("pick_entries_hint", n=len(self._titles)),
-                           bg_role="BG", pady=(6, 8))
+        self.hint_label = TLabel(
+            outer, text="", font=app.f_small, bg_role="BG", fg_role="TEXT_SUB",
+            anchor="w", justify="left", wraplength=self.WIDTH - 30)
+        self.hint_label.pack(anchor="w", fill="x", pady=(6, 8))
+        self._refresh_hint()
 
         holder = TFrame(outer, bg_role="BG")
         holder.pack(fill="both", expand=True)
@@ -350,27 +358,17 @@ class EntryPicker(tk.Toplevel):
         self._canvas.configure(yscrollcommand=bar.set)
         self._canvas.pack(side="left", fill="both", expand=True)
         bar.pack(side="right", fill="y")
-        body = TFrame(self._canvas, bg_role="BG")
-        window = self._canvas.create_window((0, 0), window=body, anchor="nw")
-        body.bind("<Configure>",
-                  lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
-        self._canvas.bind("<Configure>",
-                          lambda e: self._canvas.itemconfigure(window, width=e.width))
-
-        width = core._playlist_index_width(len(self._titles))
-        for index, text in enumerate(self._titles, start=1):
-            # 序号 + 标题；标题按可用宽度截断（ellipsize 需要字体与像素宽度）
-            label = f"{index:0{width}d} · " + ellipsize(
-                text, app.f_btn, self.WIDTH - 150)
-            pill = CheckPill(body, label, tk.BooleanVar(value=index in chosen),
-                             font=app.f_btn, bg_role="BG",
-                             width=_check_pill_width(app.f_btn, label))
-            pill.pack(anchor="w", pady=self.ROW_PADY)
-            self._pills.append(pill)
-
-        for widget in (self._canvas, body, *self._pills):
-            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-                widget.bind(sequence, self._on_wheel, add="+")
+        self._body = TFrame(self._canvas, bg_role="BG")
+        window = self._canvas.create_window((0, 0), window=self._body, anchor="nw")
+        self._body.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind(
+            "<Configure>", lambda e: self._canvas.itemconfigure(window, width=e.width))
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self._canvas.bind(sequence, self._on_wheel, add="+")
+            self._body.bind(sequence, self._on_wheel, add="+")
+        self._build_pills(chosen)
 
         buttons = TFrame(outer, bg_role="BG")
         buttons.pack(fill="x", pady=(10, 0))
@@ -378,15 +376,77 @@ class EntryPicker(tk.Toplevel):
                    font=app.f_btn, width=96, bg_role="BG").pack(side="left")
         PillButton(buttons, i18n.tr("pick_none"), command=lambda: self._select_all(False),
                    font=app.f_btn, width=96, bg_role="BG").pack(side="left", padx=(8, 0))
+        self.more_btn = PillButton(buttons, i18n.tr("pick_load_more"),
+                                   command=self._on_load_more, font=app.f_btn,
+                                   width=104, bg_role="BG")
         PillButton(buttons, i18n.tr("confirm"), command=self._confirm, primary=True,
                    font=app.f_btn, width=96, bg_role="BG").pack(side="right")
         PillButton(buttons, i18n.tr("cancel"), command=self._cancel,
                    font=app.f_btn, width=96, bg_role="BG").pack(side="right", padx=(0, 8))
 
+        self._sync_more_button()
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self._center_on(master)
 
     # ---------- 内部 ----------
+
+    def _build_pills(self, chosen):
+        """按 self._titles 重建勾选列表，chosen 是需要保持选中态的 1 基下标。"""
+        for pill in self._pills:
+            pill.destroy()
+        self._pills = []
+        width = core._playlist_index_width(len(self._titles))
+        for index, text in enumerate(self._titles, start=1):
+            # 序号 + 标题；标题按可用宽度截断（ellipsize 需要字体与像素宽度）
+            label = f"{index:0{width}d} · " + ellipsize(text, self.app.f_btn,
+                                                        self.WIDTH - 150)
+            pill = CheckPill(self._body, label, tk.BooleanVar(value=index in chosen),
+                             font=self.app.f_btn, bg_role="BG",
+                             width=_check_pill_width(self.app.f_btn, label))
+            pill.pack(anchor="w", pady=self.ROW_PADY)
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                pill.bind(sequence, self._on_wheel, add="+")
+            self._pills.append(pill)
+
+    def _refresh_hint(self):
+        # 「还有更多」和「已全部列出」要分开说，否则「前 120 条」听起来像硬上限
+        key = "pick_entries_hint_more" if self._truncated else "pick_entries_hint"
+        self.hint_label.configure(text=i18n.tr(key, n=len(self._titles)))
+
+    def _sync_more_button(self):
+        """还有更多条目才显示「加载更多」；加载中保持可见但不可点。"""
+        if self._truncated and self._on_request_more is not None:
+            if not self.more_btn.winfo_manager():
+                self.more_btn.pack(side="left", padx=(8, 0))
+        elif self.more_btn.winfo_manager():
+            self.more_btn.pack_forget()
+        self.more_btn.configure_state("disabled" if self._loading else "normal")
+
+    def set_items(self, titles, truncated=None):
+        """「加载更多」完成后替换列表，并保留用户已经勾选的条目。"""
+        chosen = set(self._collect())
+        self._titles = list(titles)
+        if truncated is not None:
+            self._truncated = bool(truncated)
+        self._loading = False
+        self._build_pills(chosen)
+        self._refresh_hint()
+        self._sync_more_button()
+
+    def show_load_error(self, text):
+        """探测失败：解除加载态并在提示区说明原因，勾选不变。"""
+        self._loading = False
+        self._sync_more_button()
+        self.hint_label.configure(text=str(text))
+
+    def _on_load_more(self):
+        if self._loading or self._on_request_more is None:
+            return
+        self._loading = True
+        self._sync_more_button()
+        self.hint_label.configure(text=i18n.tr("pick_loading_more"))
+        self._on_request_more(len(self._titles) + core.PLAYLIST_LOAD_STEP)
+
     def _center_on(self, master):
         try:
             self.update_idletasks()
@@ -572,6 +632,9 @@ class VideoPanel(TFrame):
             values=[self._playlist_limit_label(v) for v in core.PLAYLIST_LIMITS],
             font=f.f_btn, width=150)
         self._playlist_items = []      # 批量选择的下标；非空时优先于「下载范围」
+        # 已加载的条目标题与「是否还有更多」：选择器可以逐次放大探测上限
+        self._playlist_entries = []
+        self._playlist_truncated = False
         self.pick_btn = PillButton(self.opt_row2, i18n.tr("pick_entries"),
                                    command=self._open_entry_picker, font=f.f_btn,
                                    width=120, bg_role="CARD")
@@ -891,6 +954,8 @@ class VideoPanel(TFrame):
     def _probe_done(self, info):
         self._busy = False
         self._info = info
+        self._playlist_entries = list(info.playlist_entries)
+        self._playlist_truncated = bool(info.playlist_truncated)
         self.probe_btn.configure_state("normal")
         self.download_btn.configure_state("normal")
 
@@ -901,6 +966,8 @@ class VideoPanel(TFrame):
         self.quality_select.set_values(values)
         self.quality_var.set(values[0])
         self._playlist_items = []      # 换了链接/重新解析，之前的勾选作废
+        self._playlist_entries = []
+        self._playlist_truncated = False
         self._on_mode_change()
         self._load_video_thumbnail(info)
         # 浏览器 Cookie 读取失败但匿名解析成功时给出提示。
@@ -1057,6 +1124,46 @@ class VideoPanel(TFrame):
         self.progress.set(0)
         self._start_download(resume=False)
 
+    def _load_more_entries(self, limit, picker):
+        """选择器请求更多条目：后台重新扁平探测，成功后回填列表。
+
+        只放大「探测上限」，不动下载逻辑——指定条目下载时用的是 playlist_items，
+        不带 playlistend，所以选到第 250 条也能真的下到。
+        """
+        url = (self.url_entry.get() or "").strip()
+        if not url:
+            picker.show_load_error(i18n.tr("enter_video_link"))
+            return
+
+        def alive():
+            # 探测期间用户可能已经把弹窗关掉；此时任何控件操作都会 TclError
+            try:
+                return bool(picker.winfo_exists())
+            except tk.TclError:
+                return False
+
+        def worker():
+            try:
+                info = core.probe(url, preview_limit=limit)
+            except Exception as exc:                      # noqa: BLE001 - 原样告知用户
+                message = str(exc) or exc.__class__.__name__
+                self.app.after(0, lambda: alive() and picker.show_load_error(
+                    i18n.tr("pick_load_failed", error=message)))
+                return
+            titles = list(info.playlist_entries)
+            truncated = bool(info.playlist_truncated)
+
+            def apply():
+                if not alive():
+                    return
+                self._playlist_entries = titles
+                self._playlist_truncated = truncated
+                picker.set_items(titles, truncated)
+
+            self.app.after(0, apply)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _playlist_total(self):
         """整批进度需要的总数：批量选择时是选择数，限量时是限量值。"""
         if not self._info or not self._info.playlist_count:
@@ -1078,8 +1185,10 @@ class VideoPanel(TFrame):
         """打开条目选择弹窗；确定后记录勾选（空选择表示回到「下载范围」）。"""
         if not self._info or not self._info.playlist_count:
             return
-        picker = EntryPicker(self, self.app, self._info.playlist_entries,
-                             self._playlist_items)
+        picker = EntryPicker(
+            self, self.app, self._playlist_entries, self._playlist_items,
+            truncated=self._playlist_truncated,
+            on_request_more=lambda limit: self._load_more_entries(limit, picker))
         chosen = picker.show()
         if chosen is None:
             return

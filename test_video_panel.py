@@ -5,7 +5,9 @@ macOS menubar 都替换掉，既隔离结果，也不会污染用户自己的 se
 """
 
 import io
+import time
 import unittest
+from unittest.mock import Mock
 
 from app import core, gui, i18n, settings as settings_mod
 
@@ -371,8 +373,10 @@ class EntryPickerTests(unittest.TestCase):
             except Exception:
                 pass
 
-    def _picker(self, selected=None):
-        picker = gui.EntryPicker(self.app, self.app, self.titles, selected)
+    def _picker(self, selected=None, truncated=False, on_request_more=None):
+        picker = gui.EntryPicker(self.app, self.app, self.titles, selected,
+                                 truncated=truncated,
+                                 on_request_more=on_request_more)
         self._pickers.append(picker)
         return picker
 
@@ -406,10 +410,226 @@ class EntryPickerTests(unittest.TestCase):
         picker = self._picker()
         self.assertTrue(picker._pills[0]._text.startswith("01 · "), picker._pills[0]._text)
 
+    # ---------- 增量加载（#7）----------
+
+    def test_load_more_button_hidden_without_more_entries(self):
+        self.assertFalse(self._picker().more_btn.winfo_manager())
+
+    def test_load_more_button_hidden_without_callback(self):
+        """只标了「还有更多」但没人能去取，就不要显示按钮。"""
+        self.assertFalse(self._picker(truncated=True).more_btn.winfo_manager())
+
+    def test_load_more_button_visible_when_truncated(self):
+        picker = self._picker(truncated=True, on_request_more=lambda limit: None)
+        self.assertTrue(picker.more_btn.winfo_manager())
+        self.assertEqual(picker.more_btn._state, "normal")
+
+    def test_load_more_asks_for_the_next_step(self):
+        asked = []
+        picker = self._picker(truncated=True, on_request_more=asked.append)
+        picker._on_load_more()
+        self.assertEqual(asked, [len(self.titles) + core.PLAYLIST_LOAD_STEP])
+
+    def test_loading_disables_button_and_explains(self):
+        picker = self._picker(truncated=True, on_request_more=lambda limit: None)
+        picker._on_load_more()
+        self.assertEqual(picker.more_btn._state, "disabled")
+        self.assertEqual(picker.hint_label.cget("text"), i18n.tr("pick_loading_more"))
+        # 加载中重复点击不会再发一次请求
+        asked = []
+        picker._on_request_more = asked.append
+        picker._on_load_more()
+        self.assertEqual(asked, [])
+
+    def test_set_items_replaces_list_and_keeps_selection(self):
+        picker = self._picker([2, 4], truncated=True,
+                              on_request_more=lambda limit: None)
+        picker.set_items(["一", "二", "三", "四", "五", "六"], truncated=False)
+        self.assertEqual(len(picker._pills), 6)
+        self.assertEqual(picker._collect(), [2, 4])
+        self.assertFalse(picker.more_btn.winfo_manager(), "已加载完就不该再显示按钮")
+
+    def test_set_items_can_extend_and_keep_new_checks(self):
+        picker = self._picker([1], truncated=True, on_request_more=lambda limit: None)
+        picker.set_items(["一", "二", "三"], truncated=True)
+        picker._pills[2].set_checked(True)
+        self.assertEqual(picker._collect(), [1, 3])
+        self.assertEqual(picker.more_btn._state, "normal")
+
+    def test_hint_count_and_wording_follow_the_loaded_state(self):
+        """还有更多时提示「可以继续取」，全部加载完后改成「已列出全部」。"""
+        picker = self._picker(truncated=True, on_request_more=lambda limit: None)
+        picker.set_items(["一"] * 7)
+        self.assertEqual(picker.hint_label.cget("text"),
+                         i18n.tr("pick_entries_hint_more", n=7))
+        picker.set_items(["一"] * 7, truncated=False)
+        self.assertEqual(picker.hint_label.cget("text"),
+                         i18n.tr("pick_entries_hint", n=7))
+        self.assertNotEqual(i18n.tr("pick_entries_hint", n=7),
+                            i18n.tr("pick_entries_hint_more", n=7))
+
+    def test_load_error_reenables_and_reports(self):
+        picker = self._picker(truncated=True, on_request_more=lambda limit: None)
+        picker._on_load_more()
+        picker.show_load_error("网络断了")
+        self.assertEqual(picker.more_btn._state, "normal")
+        self.assertIn("网络断了", picker.hint_label.cget("text"))
+
+    def test_confirm_after_extending_reports_new_indices(self):
+        picker = self._picker([1], truncated=True, on_request_more=lambda limit: None)
+        picker.set_items([f"第{i}集" for i in range(1, 121)], truncated=False)
+        picker._pills[119].set_checked(True)
+        picker._confirm()
+        self.assertEqual(picker.result, [1, 120])
+
     def test_cancel_then_destroy_is_safe(self):
         picker = self._picker()
         picker._cancel()
         picker.destroy()          # 第二次销毁不应抛错
+
+
+class PlaylistLoadMoreTests(unittest.TestCase):
+    """面板把「加载更多」接到后台探测（#7）。
+
+    选择器自己不发请求，只回调面板；面板在后台线程里放大 playlistend 再回填，
+    所以这里断言的是「探测上限被放大」和「回填后列表真的变长、勾选没丢」。
+    """
+
+    PLAYLIST = "https://www.youtube.com/@someone/videos"
+
+    @classmethod
+    def setUpClass(cls):
+        settings_mod.load = lambda: _fake_load()
+        settings_mod.save = lambda data: None
+        gui.menubar.create = lambda *a, **kw: None
+        cls.app = gui.App()
+        cls.panel = cls.app.pages["youtube"].video_panel
+
+    @classmethod
+    def tearDownClass(cls):
+        settings_mod.load = _ORIGINAL_LOAD
+        settings_mod.save = _ORIGINAL_SAVE
+        gui.menubar.create = _ORIGINAL_MENUBAR
+        cls.app.destroy()
+
+    def setUp(self):
+        self._probe = core.probe
+        self.panel.url_entry.set(self.PLAYLIST)
+        self.panel._playlist_items = []
+        self.panel._playlist_entries = []
+        self.panel._playlist_truncated = False
+
+    def tearDown(self):
+        core.probe = self._probe
+
+    def _wait(self, condition, timeout=3.0):
+        """等后台线程把回传回调挂出来（只等线程，不等 Tk 事件）。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if condition():
+                return True
+            time.sleep(0.01)
+        return False
+
+    def _capture_after(self):
+        """接管 app.after：记下回调，由测试在主线程手动执行。
+
+        为什么必须这样：测试没有真的跑 mainloop()，而 Tk 在主线程不处于 main loop
+        时会拒绝跨线程的 after 调用（实测抛 RuntimeError: main thread is not in
+        main loop）。生产环境有 mainloop，这个改法只是让测试能确定性地驱动回传。
+        """
+        scheduled = []
+        self._after = self.app.after
+        self.app.after = lambda ms, fn=None, *a: (scheduled.append(fn), "id")[1]
+        self.addCleanup(lambda: setattr(self.app, "after", self._after))
+        return scheduled
+
+    def test_open_picker_passes_loaded_state_and_loader(self):
+        captured = {}
+
+        class FakePicker:
+            def __init__(self, master, app, titles, selected=None, **kw):
+                captured["titles"] = list(titles)
+                captured["selected"] = selected
+                captured.update(kw)
+
+            def show(self):
+                return None
+
+        original = gui.EntryPicker
+        gui.EntryPicker = FakePicker
+        try:
+            self.panel._info = Mock(playlist_count=250, playlist_truncated=True,
+                                    warning="")
+            self.panel._playlist_entries = ["第一集", "第二集"]
+            self.panel._playlist_truncated = True
+            self.panel._playlist_items = [2]
+            self.panel._open_entry_picker()
+        finally:
+            gui.EntryPicker = original
+        self.assertEqual(captured["titles"], ["第一集", "第二集"])
+        self.assertEqual(captured["selected"], [2])
+        self.assertTrue(captured["truncated"])
+        self.assertTrue(callable(captured["on_request_more"]))
+
+    def test_load_more_probes_with_the_requested_limit(self):
+        asked = []
+        picker = Mock()
+
+        def fake_probe(url, preview_limit=0):
+            asked.append((url, preview_limit))
+            return Mock(playlist_entries=[f"第{i}集" for i in range(250)],
+                        playlist_truncated=False)
+
+        core.probe = fake_probe
+        scheduled = self._capture_after()
+        self.panel._load_more_entries(200, picker)
+        self.assertTrue(self._wait(lambda: scheduled), "后台没有调度回传")
+        self.assertEqual(asked, [(self.PLAYLIST, 200)])
+        scheduled[0]()                       # 在主线程执行回传
+        picker.set_items.assert_called_with([f"第{i}集" for i in range(250)], False)
+        self.assertEqual(len(self.panel._playlist_entries), 250)
+        self.assertFalse(self.panel._playlist_truncated)
+
+    def test_load_more_failure_is_reported_to_the_picker(self):
+        picker = Mock()
+
+        def boom(url, preview_limit=0):
+            raise core.DownloadError("网络断了")
+
+        core.probe = boom
+        scheduled = self._capture_after()
+        self.panel._load_more_entries(200, picker)
+        self.assertTrue(self._wait(lambda: scheduled), "失败路径没有调度回传")
+        scheduled[0]()
+        self.assertIn("网络断了", str(picker.show_load_error.call_args[0][0]))
+        picker.set_items.assert_not_called()
+
+    def test_load_more_without_url_reports_immediately(self):
+        picker = Mock()
+        self.panel.url_entry.set("")
+        self.panel._load_more_entries(200, picker)
+        picker.show_load_error.assert_called_once()
+        picker.set_items.assert_not_called()
+
+    def test_closed_picker_is_not_touched_when_results_come_back(self):
+        """探测期间用户关掉弹窗：回填必须安全跳过，而不是对已销毁控件下手。"""
+        picker = gui.EntryPicker(self.app, self.app, ["一", "二"])
+        picker.destroy()
+        scheduled = self._capture_after()
+        core.probe = lambda url, preview_limit=0: Mock(
+            playlist_entries=["一", "二", "三"], playlist_truncated=False)
+        self.panel._load_more_entries(200, picker)
+        self.assertTrue(self._wait(lambda: scheduled))
+        scheduled[0]()                       # 不应抛 TclError
+        self.assertEqual(self.panel._playlist_entries, [], "弹窗关了就不必回填")
+
+    def test_selection_beyond_the_old_cap_is_still_valid(self):
+        """第 250 条要能真的被选中并影响命名补零宽度。"""
+        self.panel._info = Mock(playlist_truncated=True, playlist_count=100, warning="")
+        self.panel._playlist_items = [1, 250]
+        self.assertEqual(self.panel._playlist_size_hint(), 250)
+        self.assertEqual(self.panel._playlist_total(), 2)
 
 if __name__ == "__main__":
     unittest.main()

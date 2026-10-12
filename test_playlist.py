@@ -58,6 +58,39 @@ class ProbePlaylistTests(unittest.TestCase):
         # responses 是类属性（共享可变状态），逐用例清空避免相互污染
         _FakeYDL.responses = {}
 
+    def test_preview_limit_is_passed_to_ytdlp(self):
+        """「加载更多」靠放大 playlistend 实现，必须真的传下去。"""
+        seen = {}
+
+        class RecordingYDL(_FakeYDL):
+            def __init__(self, opts):
+                super().__init__(opts)
+                seen.update(opts)
+
+        flat = {"_type": "playlist", "title": "p",
+                "entries": [{"id": "aaa", "title": "First", "url": FIRST_URL}]}
+        _FakeYDL.responses = {PLAYLIST_URL: flat, FIRST_URL: _info()}
+        with mock.patch.object(core.yt_dlp, "YoutubeDL", RecordingYDL):
+            core.probe(PLAYLIST_URL, preview_limit=300)
+        self.assertEqual(seen.get("playlistend"), 300)
+
+    def test_truncated_flag_follows_the_requested_limit(self):
+        entries = [{"id": str(i), "title": f"t{i}", "url": f"https://x/{i}"}
+                   for i in range(5)]
+        _FakeYDL.responses = {
+            PLAYLIST_URL: {"_type": "playlist", "title": "p", "entries": entries},
+            FIRST_URL: _info(),
+        }
+        with mock.patch.object(core.yt_dlp, "YoutubeDL", _FakeYDL):
+            # 正好取到上限：无法确定是否还有更多，按截断处理
+            self.assertTrue(core.probe(PLAYLIST_URL, preview_limit=5).playlist_truncated)
+        with mock.patch.object(core.yt_dlp, "YoutubeDL", _FakeYDL):
+            self.assertFalse(core.probe(PLAYLIST_URL, preview_limit=50).playlist_truncated)
+
+    def test_load_step_is_sane(self):
+        self.assertGreaterEqual(core.PLAYLIST_LOAD_STEP, 10)
+        self.assertLessEqual(core.PLAYLIST_LOAD_STEP, 500)
+
     def test_playlist_is_detected_with_meta_and_first_entry_formats(self):
         flat = {
             "_type": "playlist",
