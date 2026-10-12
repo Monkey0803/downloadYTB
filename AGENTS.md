@@ -119,9 +119,12 @@ since a height that happens to equal the canvas's current height produces no `<C
 event and leaves the inner body at its old size — silently clipping content (measured 63px
 body against 91px of content on the settings page).
 
-If a colour or font change seems not to apply, clear `app/__pycache__` first: a stale
-bytecode file once made the palette report the old values while the source was already
-correct.
+If a colour or font change seems not to apply, clear `app/__pycache__` first. The cause is
+narrower than "stale cache": CPython validates a `.pyc` by source **mtime and size**, and
+every hex colour edit keeps the file size identical — so a value changed and restored within
+the same second can reuse bytecode compiled from the old value (reproduced twice here: the
+palette kept reporting `#3A4150` while the source said `#78829A`). Same-size, same-second
+edits are exactly what colour flipping produces, so suspect the cache before the code.
 
 ## Menubar Tests And AppKit Ordering
 
