@@ -79,21 +79,32 @@ WHITE = "#FFFFFF"
 
 class ContrastTests(unittest.TestCase):
     def _check(self, palette, pairs, label):
+        """只返回不达标的组合，不在这里断言。
+
+        断言放在 _check_both：先断浅色会在第一个失败处停下，深色的问题要等修完
+        浅色才暴露出来（真实踩过——调回旧配色时只看到浅色的 7 处，深色的被掩盖）。
+        """
         failures = []
         for name, fg_role, bg_role, minimum in pairs:
             fg = WHITE if fg_role is None else getattr(palette, fg_role)
             value = contrast(fg, getattr(palette, bg_role))
             if value + 1e-9 < minimum:
                 failures.append(f"{name}: {value:.2f} < {minimum}")
-        self.assertEqual(failures, [], f"{palette.name}（{label}）对比度不足：{failures}")
+        return failures
+
+    def _check_both(self, pairs, label):
+        """两套配色一起检查并一次性报出全部不足。"""
+        problems = []
+        for palette, theme_label in ((theme.LIGHT, "浅色"), (theme.DARK, "深色")):
+            for failure in self._check(palette, pairs, theme_label):
+                problems.append(f"{theme_label}/{palette.name}: {failure}")
+        self.assertEqual(problems, [], f"{label} 对比度不足：{problems}")
 
     def test_text_contrast_in_both_themes(self):
-        for palette, label in ((theme.LIGHT, "浅色"), (theme.DARK, "深色")):
-            self._check(palette, TEXT_PAIRS, label)
+        self._check_both(TEXT_PAIRS, "正文")
 
     def test_secondary_and_graphic_contrast(self):
-        for palette, label in ((theme.LIGHT, "浅色"), (theme.DARK, "深色")):
-            self._check(palette, SECONDARY_PAIRS, label)
+        self._check_both(SECONDARY_PAIRS, "次级文字与非文字图形")
 
     def test_disabled_pairs_are_low_but_explicitly_exempt(self):
         """禁用态本来就该显得「暗淡」，但要显式记录豁免，而不是漏测。
