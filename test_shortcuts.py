@@ -77,6 +77,84 @@ def test_shortcut_cancel_only_when_busy():
     page.video_panel.on_cancel.assert_called_once_with()
 
 
+def test_shortcut_download_uses_active_panel():
+    page = _Page(kind="image")
+    app = _FakeApp(page)
+    assert gui.App._shortcut_download(app) == "break"
+    page.image_panel.on_download.assert_called_once_with()
+    page.video_panel.on_download.assert_not_called()
+
+
+def test_shortcut_download_without_panel_is_safe():
+    app = _FakeApp(_Page())
+    app.pages = {}
+    app.current_page = None
+    assert gui.App._shortcut_download(app) is None
+
+
+def test_shortcut_pause_pauses_while_downloading():
+    page = _Page(kind="video")
+    page.video_panel._downloading = True
+    page.video_panel._paused = False
+    app = _FakeApp(page)
+    assert gui.App._shortcut_pause(app) == "break"
+    page.video_panel.on_pause.assert_called_once_with()
+    page.video_panel.on_resume.assert_not_called()
+
+
+def test_shortcut_pause_resumes_when_paused():
+    page = _Page(kind="video")
+    page.video_panel._downloading = True
+    page.video_panel._paused = True
+    app = _FakeApp(page)
+    assert gui.App._shortcut_pause(app) == "break"
+    page.video_panel.on_resume.assert_called_once_with()
+    page.video_panel.on_pause.assert_not_called()
+
+
+def test_shortcut_pause_when_idle_does_nothing():
+    """空闲时不该抢 ⌘P，否则会挡住其它控件的正常处理。"""
+    page = _Page(kind="video")
+    page.video_panel._downloading = False
+    page.video_panel._paused = False
+    app = _FakeApp(page)
+    assert gui.App._shortcut_pause(app) is None
+    page.video_panel.on_pause.assert_not_called()
+    page.video_panel.on_resume.assert_not_called()
+
+
+class _NoPausePanel:
+    """没有暂停能力的面板：只有下载与取消。"""
+
+    _downloading = True
+    _paused = False
+
+    def on_download(self):
+        raise AssertionError("不应被调用")
+
+    def on_cancel(self):
+        raise AssertionError("不应被调用")
+
+
+def test_shortcut_pause_is_noop_without_pause_support():
+    """图片批量下载没有暂停按钮，⌘P 必须安全空转（不能抛异常）。"""
+    page = _Page(kind="image")
+    page.image_panel = _NoPausePanel()
+    app = _FakeApp(page)
+    assert gui.App._shortcut_pause(app) is None
+
+
+def test_real_image_panel_still_has_no_pause():
+    """锁住真实类的形状：图片面板没有暂停能力时，上面的空转用例才成立。
+
+    哪天给图片批量下载加了暂停，这条会失败，提醒同步更新快捷键与提示文案。
+    """
+    assert not hasattr(gui.ImagePanel, "on_pause")
+    assert not hasattr(gui.ImagePanel, "on_resume")
+    assert hasattr(gui.VideoPanel, "on_pause")
+    assert hasattr(gui.VideoPanel, "on_resume")
+
+
 def test_shortcut_focus_url_selects_entry():
     page = _Page(kind="image")
     entry = Mock()
@@ -175,6 +253,13 @@ def test_settings_page_probes_cookies_only_when_shown():
 if __name__ == "__main__":
     test_active_panel_follows_kind_switch()
     test_shortcut_probe_uses_active_panel()
+    test_shortcut_download_uses_active_panel()
+    test_shortcut_download_without_panel_is_safe()
+    test_shortcut_pause_pauses_while_downloading()
+    test_shortcut_pause_resumes_when_paused()
+    test_shortcut_pause_when_idle_does_nothing()
+    test_shortcut_pause_is_noop_without_pause_support()
+    test_real_image_panel_still_has_no_pause()
     test_shortcut_cancel_only_when_busy()
     test_shortcut_focus_url_selects_entry()
     test_shortcut_settings_opens_settings_page()

@@ -3035,6 +3035,10 @@ class App(tk.Tk):
         bindings = (
             ("<Command-Return>", self._shortcut_probe),
             ("<Control-Return>", self._shortcut_probe),
+            ("<Command-d>", self._shortcut_download),
+            ("<Control-d>", self._shortcut_download),
+            ("<Command-p>", self._shortcut_pause),
+            ("<Control-p>", self._shortcut_pause),
             ("<Command-l>", self._shortcut_focus_url),
             ("<Control-l>", self._shortcut_focus_url),
             ("<Command-comma>", self._shortcut_settings),
@@ -3052,6 +3056,41 @@ class App(tk.Tk):
         probe = getattr(panel, "on_probe", None)
         if callable(probe):
             probe()
+            return "break"
+        return None
+
+    def _shortcut_download(self, event=None):
+        """⌘D：开始下载（等同点「开始下载」）。
+
+        正在下载时 on_download 自己会早退，所以这里不必再判状态；
+        空闲且未解析时它会先自动解析再下载，与按钮行为一致。
+        """
+        panel = _active_panel(self._current_page())
+        if panel is None:
+            return None
+        start = getattr(panel, "on_download", None)
+        if callable(start):
+            start()
+            return "break"
+        return None
+
+    def _shortcut_pause(self, event=None):
+        """⌘P：暂停 / 继续。
+
+        图片批量下载没有暂停能力（界面本来就没有该按钮），此时什么都不做；
+        空闲时也返回 None，避免抢掉其他控件对 ⌘P 的处理。
+        """
+        panel = _active_panel(self._current_page())
+        if panel is None:
+            return None
+        if bool(getattr(panel, "_paused", False)):
+            handler = getattr(panel, "on_resume", None)
+        elif bool(getattr(panel, "_downloading", False)):
+            handler = getattr(panel, "on_pause", None)
+        else:
+            return None
+        if callable(handler):
+            handler()
             return "break"
         return None
 
