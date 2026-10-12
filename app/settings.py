@@ -25,7 +25,9 @@ DEFAULTS = {
     # 剪贴板链接处理方式：suggest=先提示（默认）/ auto=自动填入 / off=不处理
     "clipboard_action": "suggest",
     "subtitle_langs": "",     # 逗号分隔的字幕语言；空表示用代码内默认值
-    "window_geometry": "",    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
+    "window_geometry": "",
+    # 下载历史：最新的在前，最多 App.HISTORY_LIMIT 条（只保存路径等本地信息）
+    "download_history": [],    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint
 }
 

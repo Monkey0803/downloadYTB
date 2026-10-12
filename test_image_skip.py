@@ -122,8 +122,15 @@ class _NoDockApp:
     那样 _dock_done 会真的去碰 Dock，测试就不再是无副作用的了。
     """
 
+    def __init__(self):
+        self.recorded = []
+
     def dock_status_enabled(self):
         return False
+
+    def record_download(self, paths, title="", platform=""):
+        # 面板完成后会写下载历史；这里只收集，不落盘
+        self.recorded.append((list(paths), title, platform))
 
 
 class DownloadDoneReportingTests(unittest.TestCase):
@@ -141,6 +148,8 @@ class DownloadDoneReportingTests(unittest.TestCase):
         args, kwargs = panel._set_status.call_args
         self.assertEqual(args[0], i18n.tr("images_complete", n=1, folder="dir"))
         self.assertTrue(kwargs.get("ok"))
+        self.assertEqual(panel.app.recorded[0][0], ["/tmp/dir/a.jpg"],
+                         "新下载的图片要写进下载历史")
 
     def test_partial_skip_is_reported(self):
         panel = self._panel()
@@ -160,6 +169,9 @@ class DownloadDoneReportingTests(unittest.TestCase):
         self.assertEqual(text, i18n.tr("images_all_skipped", n=2))
         # 跳过的文件也要留给「打开所在文件夹」，否则按钮没有目标
         self.assertEqual(panel._last_paths, ["/tmp/dir/a.jpg", "/tmp/dir/b.jpg"])
+        self.assertEqual(panel.app.recorded[0][0],
+                         ["/tmp/dir/a.jpg", "/tmp/dir/b.jpg"],
+                         "已存在的图片同样能找到，也应记入历史")
 
     def test_skip_reporting_is_localized_not_hardcoded(self):
         for key in ("images_all_skipped", "images_complete_skipped",

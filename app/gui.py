@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
@@ -613,6 +614,10 @@ class VideoPanel(TFrame):
                                    font=f.f_btn, width=130)
         self.open_btn.pack(side="right", padx=(12, 0))
         self.open_btn.configure_state("disabled")
+        self.open_file_btn = PillButton(status_row, i18n.tr("open_file"),
+                                        command=self.on_open_file, font=f.f_btn, width=104)
+        self.open_file_btn.pack(side="right")
+        self.open_file_btn.configure_state("disabled")
 
         self._status_full = (i18n.tr("enter_link_probe"), None)
         self.status_label = TLabel(status_row, text=self._status_full[0], anchor="w",
@@ -1048,6 +1053,7 @@ class VideoPanel(TFrame):
         self._last_file = None
         self._last_percent = 0.0
         self.open_btn.configure_state("disabled")
+        self.open_file_btn.configure_state("disabled")
         self.progress.set(0)
         self._start_download(resume=False)
 
@@ -1269,6 +1275,10 @@ class VideoPanel(TFrame):
         paths = [p for p in (result if isinstance(result, (list, tuple)) else [result]) if p]
         self._last_file = paths[0] if paths else None
         self.open_btn.configure_state("normal")
+        if paths:
+            self.open_file_btn.configure_state("normal")
+            self.app.record_download(paths, title=getattr(self._info, "title", ""),
+                                     platform=self.platform)
         self.progress.set(0)
         _taskbar_done(self.app)
         if len(paths) > 1:
@@ -1281,6 +1291,15 @@ class VideoPanel(TFrame):
 
     def on_open_folder(self):
         open_in_file_manager(self._last_file)
+
+    def on_open_file(self):
+        path = self._last_file
+        if not path:
+            return
+        if not os.path.exists(path):
+            self._set_status(i18n.tr("file_missing"), error=True)
+            return
+        open_path(path)
 
 
 # ====================================================================
@@ -1397,6 +1416,10 @@ class ImagePanel(TFrame):
                                    font=f.f_btn, width=130)
         self.open_btn.pack(side="right", padx=(12, 0))
         self.open_btn.configure_state("disabled")
+        self.open_file_btn = PillButton(status_row, i18n.tr("open_file"),
+                                        command=self.on_open_file, font=f.f_btn, width=104)
+        self.open_file_btn.pack(side="right")
+        self.open_file_btn.configure_state("disabled")
         self._status_full = i18n.tr("enter_link_probe")
         self.status_label = TLabel(status_row, text=self._status_full, anchor="w",
                                    font=f.f_sub, bg_role="BG", fg_role="TEXT_SUB")
@@ -1623,6 +1646,7 @@ class ImagePanel(TFrame):
         save_dir = self.app.default_save_dir(self._save_dir_key())
         self._last_paths = []
         self.open_btn.configure_state("disabled")
+        self.open_file_btn.configure_state("disabled")
         self.download_btn.configure_state("disabled")
         self.cancel_btn.pack(side="left", padx=(10, 0))
         self.probe_btn.configure_state("disabled")
@@ -1693,6 +1717,12 @@ class ImagePanel(TFrame):
         self._reset_after_download()
         self.progress.set(0)
         self.open_btn.configure_state("normal")
+        if self._last_paths:
+            self.open_file_btn.configure_state("normal")
+            # 已存在的文件也记进历史：它们同样是「能找到的产物」
+            self.app.record_download(self._last_paths,
+                                     title=getattr(self._post, "title", ""),
+                                     platform=self.platform)
         _taskbar_done(self.app)
         if not result.paths:
             # 全部已存在：报「完成 0 张」会让人以为失败了
@@ -1711,6 +1741,15 @@ class ImagePanel(TFrame):
     def on_open_folder(self):
         if self._last_paths:
             open_in_file_manager(self._last_paths[0])
+
+    def on_open_file(self):
+        if not self._last_paths:
+            return
+        path = self._last_paths[0]
+        if not os.path.exists(path):
+            self._set_status(i18n.tr("file_missing"), error=True)
+            return
+        open_path(path)
 
 
 # ====================================================================
@@ -1830,6 +1869,107 @@ class MediaPlatformPage(TFrame):
             self.show_kind("video")
         panel = self.video_panel if self.kind_var.get() == "video" else self.image_panel
         panel.handle_url(url)
+
+
+class HistoryPage(TFrame):
+    """下载历史：列出最近完成的文件，可直接打开或定位到所在文件夹。"""
+
+    MAX_ROWS = 50
+
+    def __init__(self, master, app):
+        super().__init__(master, bg_role="BG")
+        self.app = app
+        canvas = tk.Canvas(self, bg=theme.C().BG, highlightthickness=0, bd=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self._body = TFrame(canvas, bg_role="BG")
+        window = canvas.create_window((0, 0), window=self._body, anchor="nw")
+        self._body.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind(
+            "<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+
+        header = TFrame(self._body, bg_role="BG")
+        header.pack(fill="x", pady=(0, 14))
+        PageHeader(header, app, i18n.tr("history"),
+                   i18n.tr("history_subtitle")).pack(side="left", fill="x", expand=True)
+        self.clear_btn = PillButton(header, i18n.tr("history_clear"),
+                                    command=self._on_clear, font=app.f_btn, width=110,
+                                    bg_role="BG")
+        self.clear_btn.pack(side="right")
+        self.clear_btn.configure_state("disabled")
+
+        self.rows = TFrame(self._body, bg_role="BG")
+        self.rows.pack(fill="both", expand=True)
+        self.refresh()
+
+    def on_shown(self):
+        # 每次进入都刷新：下载可能发生在别的页面上
+        self.refresh()
+
+    def refresh(self):
+        for child in self.rows.winfo_children():
+            child.destroy()
+        entries = self.app.download_history()[:self.MAX_ROWS]
+        self.clear_btn.configure_state("normal" if entries else "disabled")
+        if not entries:
+            self._build_empty()
+            return
+        for entry in entries:
+            self._build_row(entry)
+
+    def _build_empty(self):
+        card = GlassCard(self.rows)
+        card.set_height(112)
+        card.pack(fill="x")
+        TLabel(card.body, text=i18n.tr("history_empty"), font=self.app.f_section,
+               bg_role="CARD").pack(anchor="w")
+        _pack_wrapped_hint(card.body, self.app, i18n.tr("history_empty_hint"),
+                           bg_role="CARD", pady=(6, 0))
+
+    def _build_row(self, entry):
+        path = str(entry.get("path") or "")
+        card = GlassCard(self.rows)
+        # GlassCard 会把内部 body 的高度写死成「卡片高度 - 内边距」，内容超出
+        # 就被裁掉（实测 96 时 body 只有 63px，而内容需要 95px，按钮整排看不见），
+        # 所以这里按「标题 + 元信息 + 按钮行」实测高度留足。
+        card.set_height(132)
+        card.pack(fill="x", pady=(0, 10))
+        TLabel(card.body, text=os.path.basename(path) or path, font=self.app.f_body,
+               bg_role="CARD", anchor="w").pack(anchor="w", fill="x")
+        meta = [str(bit) for bit in (entry.get("platform"),
+                                     _format_history_time(entry.get("time")),
+                                     os.path.dirname(path)) if bit]
+        TLabel(card.body, text="　·　".join(meta), font=self.app.f_small,
+               bg_role="CARD", fg_role="TEXT_SUB", anchor="w").pack(
+            anchor="w", fill="x", pady=(2, 8))
+        row = TFrame(card.body, bg_role="CARD")
+        row.pack(anchor="w")
+        PillButton(row, i18n.tr("open_file"), command=lambda p=path: self._open_file(p),
+                   font=self.app.f_btn, width=104, bg_role="CARD").pack(side="left")
+        PillButton(row, i18n.tr("open_folder"),
+                   command=lambda p=path: open_in_file_manager(p),
+                   font=self.app.f_btn, width=130, bg_role="CARD").pack(
+            side="left", padx=(8, 0))
+
+    def _open_file(self, path):
+        if not os.path.exists(path):
+            messagebox.showinfo(i18n.tr("history"), i18n.tr("file_missing"),
+                                parent=self.app)
+            return
+        open_path(path)
+
+    def _on_clear(self):
+        if not self.app.download_history():
+            return
+        if not messagebox.askyesno(i18n.tr("history"),
+                                   i18n.tr("history_clear_confirm"), parent=self.app):
+            return
+        self.app.clear_history()
+        self.refresh()
 
 
 class SettingsPage(TFrame):
@@ -2537,6 +2677,26 @@ def open_in_file_manager(path):
         subprocess.Popen(["xdg-open", os.path.dirname(path)])
 
 
+def open_path(path):
+    """用系统默认程序打开文件本身（而不是在文件管理器里定位它）。"""
+    if not path:
+        return
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    elif sys.platform == "win32":
+        os.startfile(path)  # noqa: S606 - 只打开用户自己刚下载的文件
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
+def _format_history_time(timestamp):
+    """把时间戳格式化成 ``2026-10-10 18:30``；脏数据返回空串。"""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(float(timestamp)))
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
 class App(tk.Tk):
     DEFAULT_GEOMETRY = "1020x745"
     MIN_SIZE = (920, 700)
@@ -2599,6 +2759,45 @@ class App(tk.Tk):
 
         self.after(300, self._check_clipboard)
         self.bind("<FocusIn>", self._on_focus_in)
+
+    # ---------- 下载历史 ----------
+
+    HISTORY_LIMIT = 50
+
+    def download_history(self):
+        """下载历史，最新的在前。
+
+        容错处理：settings 里可能残留非列表或被手工改坏的条目，一律跳过，
+        否则历史页会因为一条脏数据整页打不开。
+        """
+        entries = self.settings.get("download_history")
+        if not isinstance(entries, list):
+            return []
+        return [e for e in entries if isinstance(e, dict) and e.get("path")]
+
+    def record_download(self, paths, title="", platform="", timestamp=None):
+        """记录一次完成的下载。
+
+        同一个路径只保留最新一条（重复下载不会把列表撑满），整体截断到
+        HISTORY_LIMIT 条。批量下载（播放列表 / 图集）会产生多条记录，这是
+        有意的：每条都能单独「打开文件」。
+        """
+        if isinstance(paths, (str, bytes)):
+            paths = [paths]
+        fresh = [str(p) for p in (paths or ()) if p]
+        if not fresh:
+            return
+        when = time.time() if timestamp is None else float(timestamp)
+        replaced = set(fresh)
+        kept = [e for e in self.download_history() if str(e.get("path")) not in replaced]
+        added = [{"path": path, "title": title or "", "platform": platform or "",
+                  "time": when} for path in fresh]
+        self.settings["download_history"] = (added + kept)[:self.HISTORY_LIMIT]
+        settings.save(self.settings)
+
+    def clear_history(self):
+        self.settings["download_history"] = []
+        settings.save(self.settings)
 
     def dock_status_enabled(self):
         """是否把进度/完成状态写到 Dock 角标（用户可关闭，且仅 macOS 有效）。"""
@@ -2854,6 +3053,7 @@ class App(tk.Tk):
                 self.page_holder, self, i18n.tr("weibo_title"),
                 i18n.tr("weibo_subtitle"), platform="微博",
                 hint=i18n.tr("weibo_hint"), show_kind_switch=False),
+            "history": HistoryPage(self.page_holder, self),
             "settings": SettingsPage(self.page_holder, self),
         }
 
@@ -2871,12 +3071,18 @@ class App(tk.Tk):
             item.pack(padx=12, pady=2)
             self.nav_items[key] = item
 
-        # 设置入口固定在侧边栏底部
+        # 设置入口固定在侧边栏底部；历史排在它上面
         settings_item = SidebarItem(self.sidebar, i18n.tr("settings"), "settings",
                                     command=lambda: self.show_page("settings"),
                                     font=self.f_side)
         settings_item.pack(side="bottom", padx=12, pady=14)
         self.nav_items["settings"] = settings_item
+
+        history_item = SidebarItem(self.sidebar, i18n.tr("history"), "history",
+                                   command=lambda: self.show_page("history"),
+                                   font=self.f_side)
+        history_item.pack(side="bottom", padx=12, pady=2)
+        self.nav_items["history"] = history_item
 
         self.current_page = None
 
