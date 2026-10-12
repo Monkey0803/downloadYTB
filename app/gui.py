@@ -3388,10 +3388,32 @@ class App(tk.Tk):
             self.show_main_window()
         elif req == "quit":
             self.quit_from_menubar()
+        elif req == "clipboard":
+            self.paste_from_menubar()
+        elif req == "last_folder":
+            self.open_last_download_folder()
+        elif req == "history":
+            self.show_main_window()
+            self.show_page("history")
+        elif req == "settings":
+            self.show_main_window()
+            self.show_page("settings")
 
     def _on_close_window(self):
         """关闭窗口（红色按钮）→ 隐藏窗口，应用保留在 menubar 运行。"""
         self.withdraw()
+
+    def paste_from_menubar(self):
+        """menubar「粘贴剪贴板链接」：显式动作，忽略设置与去重记录。"""
+        self.show_main_window()
+        self._last_clipboard = None
+        self._check_clipboard(force=True)
+
+    def open_last_download_folder(self):
+        """menubar「打开上次下载文件夹」：定位到最近一条下载记录。"""
+        entries = self.download_history()
+        if entries:
+            open_in_file_manager(str(entries[0].get("path") or ""))
 
     def show_main_window(self):
         """menubar「显示主窗口」：恢复窗口并带到前台。"""
@@ -3593,29 +3615,45 @@ class App(tk.Tk):
     def _dismiss_clipboard_suggestion(self):
         self._hide_clipboard_suggestion()
 
-    def _check_clipboard(self):
+    def _check_clipboard(self, force=False):
+        """检测剪贴板里的链接。
+
+        force=True 用于 menubar 的「粘贴剪贴板链接」：这是用户的显式动作，所以
+        跳过「不处理」设置与「同一段文本不重复提示」的去重记录，直接填入并解析。
+        """
         try:
             text = self.clipboard_get()
         except tk.TclError:
             return
-        if text == self._last_clipboard:
+        if not force and text == self._last_clipboard:
             return
         self._last_clipboard = text
         action = self.clipboard_action()
-        if action == "off":
+        if action == "off" and not force:
             return
         url = extract_supported_url(text)
         if not url:
+            if force:
+                self._set_status_anywhere(i18n.tr("clipboard_no_link"), error=True)
             return
         platform = detect_platform(url)
         if platform not in self.pages:
+            if force:
+                self._set_status_anywhere(i18n.tr("clipboard_no_link"), error=True)
             return
-        if action == "auto":
+        if force or action == "auto":
             # 保留旧行为，但改成需要用户显式选择
             self.show_page(platform)
             self.pages[platform].handle_url(url)
             return
         self._show_clipboard_suggestion(url)
+
+    def _set_status_anywhere(self, text, error=False):
+        """把状态写到当前可见面板（menubar 动作发生在哪个页面并不确定）。"""
+        panel = _active_panel(self._current_page())
+        setter = getattr(panel, "_set_status", None)
+        if callable(setter):
+            setter(text, error=error)
 
 
 def run():

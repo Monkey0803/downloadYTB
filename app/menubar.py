@@ -18,9 +18,16 @@ Fatal Error（SIGABRT，已在打包后的 .app 实测复现）。
 菜单结构：
     当前状态（只读，菜单弹出时通过 menuNeedsUpdate: 刷新）
     ─────────
+    粘贴剪贴板链接 / 打开上次下载文件夹
+    ─────────
+    下载历史 / 设置…
+    ─────────
     显示主窗口
     ─────────
     退出
+
+菜单项标题与启用状态都通过 `self._items` 按动作名索引更新，不再用「第 N 项」这种
+下标写法——加一项就会错位（旧实现正是如此）。
 """
 
 import sys
@@ -60,6 +67,22 @@ if _AVAILABLE:
         def quitApp_(self, sender):
             NSApp.activateIgnoringOtherApps_(True)
             self.controller.pending = "quit"
+
+        def clipboardLink_(self, sender):
+            NSApp.activateIgnoringOtherApps_(True)
+            self.controller.pending = "clipboard"
+
+        def openLastFolder_(self, sender):
+            NSApp.activateIgnoringOtherApps_(True)
+            self.controller.pending = "last_folder"
+
+        def showHistory_(self, sender):
+            NSApp.activateIgnoringOtherApps_(True)
+            self.controller.pending = "history"
+
+        def showSettings_(self, sender):
+            NSApp.activateIgnoringOtherApps_(True)
+            self.controller.pending = "settings"
 
         # —— NSMenuDelegate：菜单即将弹出时刷新状态文案 ——
 
@@ -117,23 +140,32 @@ if _AVAILABLE:
         def _build_menu(self):
             menu = NSMenu.alloc().init()
             menu.setDelegate_(self._delegate)
+            # 动作名 -> (菜单项, i18n 键)，供 update_language / refresh_status 使用
+            self._items = {}
 
             self._status_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 i18n.tr("idle"), None, "")
             self._status_mi.setEnabled_(False)
             menu.addItem_(self._status_mi)
-            menu.addItem_(NSMenuItem.separatorItem())
 
-            show_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                i18n.tr("show_window"), b"showWindow:", "")
-            show_mi.setTarget_(self._delegate)
-            menu.addItem_(show_mi)
-            menu.addItem_(NSMenuItem.separatorItem())
+            def add(action, selector, key, enabled=True):
+                item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    i18n.tr(key), selector, "")
+                item.setTarget_(self._delegate)
+                item.setEnabled_(enabled)
+                menu.addItem_(item)
+                self._items[action] = (item, key)
 
-            quit_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                i18n.tr("quit"), b"quitApp:", "")
-            quit_mi.setTarget_(self._delegate)
-            menu.addItem_(quit_mi)
+            menu.addItem_(NSMenuItem.separatorItem())
+            add("clipboard", b"clipboardLink:", "menubar_paste")
+            add("last_folder", b"openLastFolder:", "menubar_last_folder", enabled=False)
+            menu.addItem_(NSMenuItem.separatorItem())
+            add("history", b"showHistory:", "history")
+            add("settings", b"showSettings:", "settings")
+            menu.addItem_(NSMenuItem.separatorItem())
+            add("show", b"showWindow:", "show_window")
+            menu.addItem_(NSMenuItem.separatorItem())
+            add("quit", b"quitApp:", "quit")
 
             self._item.setMenu_(menu)
 
@@ -145,10 +177,8 @@ if _AVAILABLE:
         def update_language(self):
             """刷新菜单项文案；只在 Tk 主线程调用。"""
             self._status_mi.setTitle_(i18n.tr("idle"))
-            menu = self._item.menu()
-            if menu is not None and menu.numberOfItems() >= 4:
-                menu.itemAtIndex_(2).setTitle_(i18n.tr("show_window"))
-                menu.itemAtIndex_(4).setTitle_(i18n.tr("quit"))
+            for item, key in getattr(self, "_items", {}).values():
+                item.setTitle_(i18n.tr(key))
 
         def refresh_status(self):
             """菜单弹出时刷新只读状态项（只读取纯 Python 状态，不碰 Tk）。"""
@@ -157,6 +187,13 @@ if _AVAILABLE:
             except Exception:
                 text = i18n.tr("idle")
             self._status_mi.setTitle_(text)
+            # 没有下载历史时「打开上次下载文件夹」置灰（同样只读纯 Python 状态）
+            entry = getattr(self, "_items", {}).get("last_folder")
+            if entry is not None:
+                try:
+                    entry[0].setEnabled_(bool(self.app.download_history()))
+                except Exception:
+                    entry[0].setEnabled_(False)
 
         def remove(self):
             """从状态栏移除图标（真正退出前调用）。"""
