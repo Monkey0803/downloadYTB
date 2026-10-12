@@ -87,9 +87,10 @@ class BreakingTests(unittest.TestCase):
             ("fix(repo): 改了默认值", "- 行为变更：默认值从 A 改成 B")))[0]
         self.assertTrue(commit.is_breaking)
 
-    def test_marker_in_the_subject_is_breaking(self):
+    def test_marker_in_the_subject_alone_is_not_breaking(self):
+        """主题行里出现这个词不算：本仓库会把它当话题词（工具自身的改动就踩过）。"""
         commit = rn.parse_commits(log(("feat(repo): 行为变更：新的默认行为", "- 细节")))[0]
-        self.assertTrue(commit.is_breaking)
+        self.assertFalse(commit.is_breaking)
 
     def test_normal_commit_is_not_breaking(self):
         commit = rn.parse_commits(log(("fix(repo): 常规修复", "- 只是修了个错")))[0]

@@ -89,9 +89,9 @@ class Commit:
             lowered = bullet.lower()
             if any(lowered.startswith(marker.lower()) for marker in BREAKING_MARKERS):
                 return True
-        # 主题行里写了标记也算：句子短、指向明确，误判风险很低（正文才需要防误判）
-        subject = self.subject.lower()
-        return any(marker.lower() in subject for marker in BREAKING_MARKERS)
+        # 刻意**不**看主题行：本仓库会用它当话题词（例如「修正行为变更标记的识别规则」
+        # 这种主题），一旦放进来就会把工具自身的改动误报成行为变更（真实发生过）。
+        return False
 
     def __repr__(self):  # pragma: no cover - 调试用
         return f"<Commit {self.type}: {self.text[:30]!r}>"
