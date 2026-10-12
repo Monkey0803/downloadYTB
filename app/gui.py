@@ -1999,6 +1999,8 @@ class SettingsPage(TFrame):
         PageHeader(self._scroll_body, app, i18n.tr("settings"), i18n.tr("settings_subtitle")).pack(
             fill="x", pady=(0, 14))
 
+        self._section("settings_section_general")
+
         # —— 外观 ——
         card1 = GlassCard(self._scroll_body)
         card1.set_height(112)
@@ -2065,6 +2067,8 @@ class SettingsPage(TFrame):
                font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB",
                anchor="w", justify="left").pack(anchor="w", fill="x", pady=(10, 0))
 
+        self._section("settings_section_save")
+
         # —— 默认保存位置 ——
         card2 = GlassCard(self._scroll_body)
         card2.set_height(104)
@@ -2080,6 +2084,8 @@ class SettingsPage(TFrame):
             side="left", fill="x", expand=True)
         PillButton(row2, i18n.tr("choose"), command=self._choose_dir,
                    font=f.f_btn, width=74, bg_role="CARD").pack(side="left", padx=(10, 0))
+
+        self._section("settings_section_cookies")
 
         # —— 登录 Cookie ——
         card3 = GlassCard(self._scroll_body)
@@ -2183,6 +2189,8 @@ class SettingsPage(TFrame):
                            bg_role="CARD", pady=(12, 0))
         self._track_card("platform", card_plat, bp)
 
+        self._section("settings_section_download")
+
         # —— 下载行为：跳过重复图片 + Dock 提示 ——
         card_dock = GlassCard(self._scroll_body)
         card_dock.set_height(190)
@@ -2249,6 +2257,8 @@ class SettingsPage(TFrame):
                            bg_role="CARD", pady=(8, 0))
         self._track_card("subtitles", card_sub, bs)
 
+        self._section("settings_section_advanced")
+
         # —— 快捷键 ——
         card_keys = GlassCard(self._scroll_body)
         card_keys.set_height(96)
@@ -2290,6 +2300,15 @@ class SettingsPage(TFrame):
         即使用户这次根本没打算下载。
         """
         self.after_idle(self._refresh_cookie_status)
+
+    def _section(self, title_key):
+        """分组标题：把十来张卡片切成可扫读的几段。
+
+        不改动卡片的创建顺序，只在既有分组注释的位置插入标题，避免为了「好看」
+        而搬动大段布局代码。
+        """
+        TLabel(self._scroll_body, text=i18n.tr(title_key), font=self.app.f_section,
+               bg_role="BG", fg_role="TEXT").pack(anchor="w", pady=(10, 8))
 
     def _track_card(self, name, card, body):
         """登记一张按内容自适应高度的卡片。
