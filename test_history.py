@@ -75,11 +75,12 @@ class HistoryDataTests(unittest.TestCase):
     def test_playlist_batch_is_truncated_not_rejected(self):
         app = _FakeApp()
         batch = [f"/tmp/pl{i:03d}.mp4" for i in range(80)]
-        self._record(app, batch, title="整个列表", platform="YouTube", timestamp=1)
+        self._record(app, batch, title="整个列表", platform="youtube", timestamp=1)
         entries = gui.App.download_history(app)
         self.assertEqual(len(entries), app.HISTORY_LIMIT)
         self.assertEqual(entries[0]["title"], "整个列表")
-        self.assertEqual(entries[0]["platform"], "YouTube")
+        self.assertEqual(entries[0]["platform"], "youtube",
+                         "平台标识现在是 ASCII 键（与引擎/Cookie 覆盖一致）")
 
     def test_single_string_path_is_accepted(self):
         app = _FakeApp()
@@ -146,13 +147,13 @@ class HistoryPersistenceTests(unittest.TestCase):
     def test_history_survives_a_real_reload(self):
         app = _FakeApp(settings_mod.load())
         gui.App.record_download(app, ["/tmp/保留的文件.mp4"], title="保留标题",
-                                platform="X", timestamp=1234)
+                                platform="x", timestamp=1234)
         reloaded = settings_mod.load()
         entries = reloaded["download_history"]
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["path"], "/tmp/保留的文件.mp4")
         self.assertEqual(entries[0]["title"], "保留标题")
-        self.assertEqual(entries[0]["platform"], "X")
+        self.assertEqual(entries[0]["platform"], "x")
         self.assertEqual(entries[0]["time"], 1234)
 
     def test_cleared_history_stays_cleared(self):
@@ -269,7 +270,7 @@ class HistoryPageTests(unittest.TestCase):
 
     def test_rows_appear_after_recording(self):
         gui.App.record_download(self.app, ["/tmp/视频一.mp4"], title="视频一",
-                                platform="YouTube", timestamp=time.time())
+                                platform="youtube", timestamp=time.time())
         self.page.refresh()
         self.assertEqual(len(self._rows()), 1)
         self.assertEqual(self.page.clear_btn._state, "normal")
@@ -368,7 +369,8 @@ class PanelHistoryWiringTests(unittest.TestCase):
         entries = self.app.download_history()
         self.assertEqual([e["path"] for e in entries], ["/tmp/示例.mp4"])
         self.assertEqual(entries[0]["title"], "示例视频")
-        self.assertEqual(entries[0]["platform"], "YouTube")
+        self.assertEqual(entries[0]["platform"], "youtube",
+                         "平台标识现在是 ASCII 键（与引擎/Cookie 覆盖一致）")
 
     def test_video_panel_records_every_playlist_file(self):
         self.video._info = Mock(title="整个列表")

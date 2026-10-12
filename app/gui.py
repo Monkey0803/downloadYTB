@@ -108,17 +108,28 @@ def is_weibo_video_url(url: str):
     return "/tv/show/" in low or "video.weibo.com/show" in low
 
 
+def platform_label(platform: str) -> str:
+    """把 ASCII 平台键翻成界面上的平台名；未知值原样返回。
+
+    面板的身份标识统一用 ``platforms.PLATFORMS`` 里的 ASCII 键（与引擎、Cookie
+    覆盖、保存目录键一致），显示时才翻成当前语言的标签。
+    """
+    key = str(platform or "").strip().lower()
+    labels = dict(zip(platforms.PLATFORMS, PLATFORM_LABEL_KEYS))
+    label_key = labels.get(key)
+    return i18n.tr(label_key) if label_key else str(platform or "")
+
+
 def download_dir_key(platform: str, kind: str) -> str:
-    """返回一个下载方式的保存目录键，例如 ``youtube_audio``。"""
-    platform_keys = {
-        "YouTube": "youtube",
-        "X": "x",
-        "Instagram": "instagram",
-        "抖音": "douyin",
-        "哔哩哔哩": "bilibili",
-        "微博": "weibo",
-    }
-    platform_key = platform_keys.get(platform, (platform or "unknown").lower())
+    """返回一个下载方式的保存目录键，例如 ``youtube_audio``。
+
+    ``platform`` 是 ASCII 平台键。历史版本传过显示名（"YouTube"/"微博"），
+    所以这里额外做一次小写归一：ASCII 名字（含旧调用点）结果不变，而中文名会
+    落到 unknown——调用点已全部改成 ASCII 键，不存在这种输入。
+    """
+    platform_key = str(platform or "unknown").strip().lower()
+    if not platform_key.isascii():
+        platform_key = "unknown"
     return f"{platform_key}_{kind}"
 
 
@@ -566,7 +577,7 @@ class VideoPanel(TFrame):
     THUMB_W = 140
     THUMB_H = 79
 
-    def __init__(self, master, app, platform="YouTube", show_audio=True,
+    def __init__(self, master, app, platform="youtube", show_audio=True,
                  on_redirect=None):
         super().__init__(master, bg_role="BG")
         self.app = app
@@ -588,7 +599,7 @@ class VideoPanel(TFrame):
         self._build()
 
     def _url_prompt_key(self):
-        return "post_link" if self.platform == "微博" else "video_link"
+        return "post_link" if self.platform == "weibo" else "video_link"
 
     # ---------- 界面 ----------
 
@@ -834,7 +845,7 @@ class VideoPanel(TFrame):
             elif not audio:
                 widget.pack_forget()
 
-        show_subs = (not audio) and self.platform == "YouTube"
+        show_subs = (not audio) and self.platform == "youtube"
         if show_subs and not self.subtitle_check.winfo_manager():
             self.subtitle_check.pack(side="left", padx=(22, 0))
         elif not show_subs:
@@ -955,7 +966,7 @@ class VideoPanel(TFrame):
         self.thumb_label.configure(image="")
 
     def _save_dir_key(self):
-        if self.platform == "微博":
+        if self.platform == "weibo":
             return download_dir_key(self.platform, "media")
         kind = "audio" if self.mode_var.get() == "audio" else "video"
         return download_dir_key(self.platform, kind)
@@ -994,7 +1005,7 @@ class VideoPanel(TFrame):
         if not url:
             self._set_status(i18n.tr(self._url_prompt_key()), error=True)
             return
-        if (self.platform == "微博" and not is_weibo_video_url(url)
+        if (self.platform == "weibo" and not is_weibo_video_url(url)
                 and self._on_redirect is not None):
             self._on_redirect("image", url)
             return
@@ -1154,7 +1165,7 @@ class VideoPanel(TFrame):
         if not url:
             self._set_status(i18n.tr(self._url_prompt_key()), error=True)
             return
-        if (self.platform == "微博" and not is_weibo_video_url(url)
+        if (self.platform == "weibo" and not is_weibo_video_url(url)
                 and self._on_redirect is not None):
             self._on_redirect("image", url)
             return
@@ -1176,7 +1187,7 @@ class VideoPanel(TFrame):
             "audio_format_id": audio_option.format_id if audio_option else None,
             "audio_format": self._audio_format(),
             "subtitles": (self.mode_var.get() != "audio"
-                          and self.platform == "YouTube"
+                          and self.platform == "youtube"
                           and bool(self.subtitle_var.get())),
             "subtitle_langs": self.app.settings.get("subtitle_langs", ""),
             # 只有解析到播放列表时才可能扩大下载范围；否则固定为「仅当前视频」
@@ -1506,7 +1517,7 @@ class ImagePanel(TFrame):
     PICKER_CHROME_HEIGHT = 96
     PICKER_MIN_HEIGHT = 80
 
-    def __init__(self, master, app, platform="X", on_redirect=None):
+    def __init__(self, master, app, platform="x", on_redirect=None):
         super().__init__(master, bg_role="BG")
         self.app = app
         self.platform = platform
@@ -1662,7 +1673,7 @@ class ImagePanel(TFrame):
             self.app.apply_download_dir(self._save_dir_key(), path)
 
     def _save_dir_key(self):
-        if self.platform == "微博":
+        if self.platform == "weibo":
             return download_dir_key(self.platform, "media")
         return download_dir_key(self.platform, "image")
 
@@ -1706,7 +1717,7 @@ class ImagePanel(TFrame):
         if not url:
             self._set_status(i18n.tr("enter_post_link"), error=True)
             return
-        if (self.platform == "微博" and is_weibo_video_url(url)
+        if (self.platform == "weibo" and is_weibo_video_url(url)
                 and self._on_redirect is not None):
             self._on_redirect("video", url)
             return
@@ -2015,7 +2026,7 @@ class MediaPlatformPage(TFrame):
         if hint:
             self.hint_label = _pack_wrapped_hint(self, app, hint)
 
-        redirect = self._redirect_panel if platform == "微博" else None
+        redirect = self._redirect_panel if platform == "weibo" else None
         self.video_panel = VideoPanel(self, app, platform=platform, show_audio=False,
                                       on_redirect=redirect)
         self.image_panel = ImagePanel(self, app, platform=platform,
@@ -2046,7 +2057,7 @@ class MediaPlatformPage(TFrame):
 
     def handle_url(self, url):
         low = url.lower()
-        if self.platform == "微博":
+        if self.platform == "weibo":
             # 普通微博状态默认进入媒体列表；微博专用视频 URL 进入视频面板。
             if not is_weibo_video_url(low):
                 self.show_kind("image")
@@ -2146,7 +2157,7 @@ class QueuePage(TFrame):
                font=self.app.f_body, bg_role="CARD", anchor="w").pack(
             anchor="w", fill="x")
         meta = [i18n.tr("queue") + f" {index + 1}",
-                str(item.get("platform") or "")]
+                platform_label(item.get("platform"))]
         TLabel(card.body, text="　·　".join(bit for bit in meta if bit),
                font=self.app.f_small, bg_role="CARD", fg_role="TEXT_SUB",
                anchor="w").pack(anchor="w", fill="x", pady=(2, 8))
@@ -2244,7 +2255,7 @@ class HistoryPage(TFrame):
         card.pack(fill="x", pady=(0, 10))
         TLabel(card.body, text=os.path.basename(path) or path, font=self.app.f_body,
                bg_role="CARD", anchor="w").pack(anchor="w", fill="x")
-        meta = [str(bit) for bit in (entry.get("platform"),
+        meta = [str(bit) for bit in (platform_label(entry.get("platform")),
                                      _format_history_time(entry.get("time")),
                                      os.path.dirname(path)) if bit]
         TLabel(card.body, text="　·　".join(meta), font=self.app.f_small,
@@ -3549,25 +3560,25 @@ class App(tk.Tk):
         self.pages = {
             "youtube": VideoPlatformPage(
                 self.page_holder, self, i18n.tr("youtube_title"),
-                i18n.tr("youtube_subtitle"), platform="YouTube"),
+                i18n.tr("youtube_subtitle"), platform="youtube"),
             "x": MediaPlatformPage(
                 self.page_holder, self, i18n.tr("x_title"), i18n.tr("x_subtitle"),
-                platform="X"),
+                platform="x"),
             "instagram": MediaPlatformPage(
                 self.page_holder, self, i18n.tr("instagram_title"), i18n.tr("instagram_subtitle"),
-                platform="Instagram",
+                platform="instagram",
                 hint=i18n.tr("instagram_hint")),
             "douyin": VideoPlatformPage(
                 self.page_holder, self, i18n.tr("douyin_title"),
-                i18n.tr("douyin_subtitle"), platform="抖音",
+                i18n.tr("douyin_subtitle"), platform="douyin",
                 hint=i18n.tr("douyin_hint")),
             "bilibili": VideoPlatformPage(
                 self.page_holder, self, i18n.tr("bilibili_title"),
-                i18n.tr("bilibili_subtitle"), platform="哔哩哔哩",
+                i18n.tr("bilibili_subtitle"), platform="bilibili",
                 hint=i18n.tr("bilibili_hint")),
             "weibo": MediaPlatformPage(
                 self.page_holder, self, i18n.tr("weibo_title"),
-                i18n.tr("weibo_subtitle"), platform="微博",
+                i18n.tr("weibo_subtitle"), platform="weibo",
                 hint=i18n.tr("weibo_hint"), show_kind_switch=False),
             "queue": QueuePage(self.page_holder, self),
             "history": HistoryPage(self.page_holder, self),
