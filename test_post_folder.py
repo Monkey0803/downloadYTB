@@ -9,9 +9,11 @@
 """
 
 import os
+import shutil
+import tempfile
 import unittest
 
-from app import core, gui, images, settings as settings_mod
+from app import core, gui, i18n, images, settings as settings_mod
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -175,7 +177,11 @@ class PanelDownloadDirTests(unittest.TestCase):
         self.assertTrue(os.path.basename(panel._download_dir()).startswith("Rmr4XxLMD"))
 
     def test_weibo_video_panel_groups_the_same_way(self):
-        """同一帖子的图片与视频流程要落到同一个目录。"""
+        """同一帖子的图片与视频流程要落在同一个帖子目录下。
+
+        视频面板自己多带一层媒体类型目录（video），图片流程的类型目录由引擎按条目
+        算——两者的「帖子目录」必须一致，且视频文件要落在同一个 video 桶里。
+        """
         image_panel = self.app.pages["weibo"].image_panel
         video_panel = self.app.pages["weibo"].video_panel
         image_panel._post = images.ImagePost(url=WEIBO, title=WEIBO_TITLE, author="",
@@ -183,7 +189,11 @@ class PanelDownloadDirTests(unittest.TestCase):
         video_panel._info = core.VideoInfo(url=WEIBO, title=WEIBO_TITLE, duration=10.0,
                                           uploader="")
         self.app.settings["group_by_post"] = True
-        self.assertEqual(video_panel._download_dir(), image_panel._download_dir())
+        post_dir = image_panel._download_dir()
+        self.assertEqual(video_panel._download_dir(), os.path.join(post_dir, "video"))
+        # 图片流程里那条 MP4（动图的视频版本）也会进 video 桶，两者同处一地
+        self.assertEqual(images.media_bucket(_item(1, "mp4", "video")),
+                         os.path.basename(video_panel._download_dir()))
 
     def test_youtube_panel_is_unaffected_even_when_on(self):
         panel = self.app.pages["youtube"].video_panel
@@ -236,6 +246,192 @@ class PostFolderSettingUiTests(unittest.TestCase):
         self.app.update_idletasks()
         self.assertTrue(self.app.settings["group_by_post"])
         self.assertTrue(self.saved[-1]["group_by_post"])
+
+
+class _FakeResponse:
+    def __init__(self, content):
+        self.content = content
+        self.headers = {"Content-Length": str(len(content))}
+
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size=65536):
+        yield self.content
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class _FakeRequests:
+    """替换 images.requests，避免联网。"""
+
+    class RequestException(Exception):
+        pass
+
+    def __init__(self):
+        self.requests = []
+
+    def Session(self):
+        outer = self
+
+        class _Session:
+            headers = {}
+
+            def get(self, url, **kwargs):
+                outer.requests.append(url)
+                return _FakeResponse(b"payload:" + url.encode())
+
+        return _Session()
+
+    def __enter__(self):
+        self.original = images.requests
+        images.requests = self
+        return self
+
+    def __exit__(self, *exc_info):
+        images.requests = self.original
+        return False
+
+
+def _item(index, extension, media_type="image"):
+    return images.ImageItem(url=f"https://example.com/{index}", thumb_url="",
+                            index=index, extension=extension,
+                            filename=f"Rmr4XxLMD_{index}", media_type=media_type)
+
+
+class MediaBucketTests(unittest.TestCase):
+    def test_buckets(self):
+        self.assertEqual(images.media_bucket(_item(1, "jpg")), "image")
+        self.assertEqual(images.media_bucket(_item(2, "png")), "image")
+        self.assertEqual(images.media_bucket(_item(3, "gif")), "gif")
+        self.assertEqual(images.media_bucket(_item(4, "mp4", "video")), "video")
+        self.assertEqual(images.media_bucket(_item(5, "m4s", "video")), "video")
+
+    def test_gif_extension_is_case_insensitive(self):
+        self.assertEqual(images.media_bucket(_item(1, "GIF")), "gif")
+
+    def test_bucket_names_do_not_follow_the_ui_language(self):
+        """目录名必须与语言无关：否则切语言后路径和下载历史都会漂移。"""
+        original = i18n.language()
+        try:
+            i18n.set_language("zh_CN")
+            chinese = [images.media_bucket(_item(i, ext, mt)) for i, (ext, mt) in
+                       enumerate([("jpg", "image"), ("gif", "image"), ("mp4", "video")], 1)]
+            i18n.set_language("en")
+            english = [images.media_bucket(_item(i, ext, mt)) for i, (ext, mt) in
+                       enumerate([("jpg", "image"), ("gif", "image"), ("mp4", "video")], 1)]
+        finally:
+            i18n.set_language(original)
+        self.assertEqual(chinese, english)
+        for bucket in chinese:
+            self.assertTrue(bucket.isascii())
+
+
+class TypeFolderDownloadTests(unittest.TestCase):
+    """引擎确实把条目写进各自的类型子目录。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="post_folder_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _items(self):
+        return [_item(1, "jpg"), _item(2, "gif"), _item(3, "mp4", "video")]
+
+    def test_grouped_layout(self):
+        with _FakeRequests():
+            result = images.download_images(self._items(), save_dir=self.tmp,
+                                            skip_existing=False, group_by_type=True)
+        dirs = sorted(os.path.relpath(os.path.dirname(path), self.tmp)
+                      for path in result.paths)
+        self.assertEqual(dirs, ["gif", "image", "video"])
+        self.assertTrue(os.path.isdir(os.path.join(self.tmp, "gif")))
+
+    def test_flat_by_default(self):
+        """不开分组时一个子目录都不该出现（默认行为逐字节不变）。"""
+        with _FakeRequests():
+            result = images.download_images(self._items(), save_dir=self.tmp,
+                                            skip_existing=False)
+        for path in result.paths:
+            self.assertEqual(os.path.dirname(path), self.tmp)
+        self.assertEqual(sorted(os.listdir(self.tmp)),
+                         ["Rmr4XxLMD_1.jpg", "Rmr4XxLMD_2.gif", "Rmr4XxLMD_3.mp4"])
+
+    def test_skip_existing_works_inside_each_type_folder(self):
+        """重复检测要在各自类型目录里生效，否则重复下载会复活。"""
+        with _FakeRequests() as fake:
+            first = images.download_images(self._items(), save_dir=self.tmp,
+                                          skip_existing=True, group_by_type=True)
+            second = images.download_images(self._items(), save_dir=self.tmp,
+                                           skip_existing=True, group_by_type=True)
+            second_run_requests = len(fake.requests) - 3
+        self.assertEqual(len(first.paths), 3)
+        self.assertEqual(second.paths, [])
+        self.assertEqual(sorted(second.skipped), sorted(first.paths))
+        self.assertEqual(second_run_requests, 0, "已存在的文件不该再发请求")
+
+
+class TypeFolderPanelTests(unittest.TestCase):
+    """面板：目录与分类型开关的配合。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = _shared_app()
+
+    def setUp(self):
+        settings_mod.save = lambda data: None
+        self.app.settings["group_by_post"] = False
+
+    def tearDown(self):
+        settings_mod.save = _ORIGINAL_SAVE
+        self.app.settings["group_by_post"] = False
+
+    def _weibo_post(self):
+        return images.ImagePost(url=WEIBO, title=WEIBO_TITLE, author="",
+                                post_id="Rmr4XxLMD")
+
+    def test_video_panel_puts_video_in_the_video_folder(self):
+        panel = self.app.pages["weibo"].video_panel
+        panel._info = core.VideoInfo(url=WEIBO, title=WEIBO_TITLE, duration=9.0,
+                                     uploader="")
+        self.app.settings["group_by_post"] = True
+        self.assertEqual(os.path.basename(panel._download_dir()), "video")
+
+    def test_video_panel_audio_mode_uses_the_audio_folder(self):
+        panel = self.app.pages["youtube"].video_panel
+        panel._info = core.VideoInfo(url="https://x.com/a/status/123", title="t",
+                                     duration=9.0, uploader="")
+        panel.mode_var.set("audio")
+        self.app.settings["group_by_post"] = True
+        try:
+            self.assertEqual(os.path.basename(panel._download_dir()), "audio")
+        finally:
+            panel.mode_var.set("video")
+
+    def test_image_panel_groups_types_only_when_a_post_folder_is_used(self):
+        panel = self.app.pages["weibo"].image_panel
+        panel._post = self._weibo_post()
+        self.assertFalse(panel._group_by_type(), "默认关闭时不该分类型")
+        self.app.settings["group_by_post"] = True
+        self.assertTrue(panel._group_by_type())
+        # 认不出帖子 ID 的链接：即使开关打开也保持平铺
+        panel._post = images.ImagePost(
+            url="https://www.youtube.com/watch?v=aqz-KE-bpKQ", title="t", author="")
+        self.assertFalse(panel._group_by_type())
+
+    def test_post_dir_without_kind_has_no_type_folder(self):
+        """App 层的 kind 是可选的：不传就不分类型（图片面板交给引擎按条目分）。"""
+        self.app.settings["group_by_post"] = True
+        base = "/tmp/下载测试"
+        path = self.app._post_download_dir(base, WEIBO, WEIBO_TITLE)
+        self.assertEqual(os.path.dirname(path), base)
+        with_kind = self.app._post_download_dir(base, WEIBO, WEIBO_TITLE, kind="video")
+        self.assertEqual(with_kind, os.path.join(path, "video"))
 
 
 if __name__ == "__main__":

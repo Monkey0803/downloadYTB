@@ -717,6 +717,17 @@ def fetch_thumbnail(item: ImageItem, max_bytes: int = 8 * 1024 * 1024,
     return fetch_image_bytes(item.thumb_url, max_bytes=max_bytes, retries=retries)
 
 
+def media_bucket(item) -> str:
+    """条目属于哪个媒体类型目录：image / gif / video。
+
+    刻意用 ASCII 且不经过 i18n：目录名一旦随界面语言变化，用户切语言后既有的
+    路径、下载历史里的目录都会对不上（同一帖子的重复检测也会失效）。
+    """
+    if getattr(item, "media_type", "image") == "video":
+        return "video"
+    return "gif" if str(getattr(item, "extension", "")).lower() == "gif" else "image"
+
+
 def _primary_path(save_dir: str, stem: str, ext: str) -> str:
     """该图片「本来应该」保存到的路径（不做重名规避）。
 
@@ -743,8 +754,12 @@ def download_images(
     progress: Optional[ImageProgress] = None,
     cancel_event: Optional[threading.Event] = None,
     skip_existing: bool = True,
+    group_by_type: bool = False,
 ) -> DownloadResult:
     """逐张下载图片，返回本次下载与跳过的路径。
+
+    group_by_type 为真时，条目会按 media_bucket() 落到 save_dir 下的类型子目录
+    （一次调用里常常既有 GIF 又有 MP4，所以分目录只能在这里按条目算）。
 
     skip_existing 为真时，目标文件已存在就跳过（与视频走 yt-dlp 默认
     「已下载则跳过」的行为一致），避免同一帖子反复下载出一堆 " (1)" 副本；
@@ -764,7 +779,11 @@ def download_images(
         if cancel_event is not None and cancel_event.is_set():
             raise ImageCancelled()
 
-        primary = _primary_path(save_dir, item.filename, item.extension)
+        item_dir = save_dir
+        if group_by_type:
+            item_dir = os.path.join(save_dir, media_bucket(item))
+            os.makedirs(item_dir, exist_ok=True)
+        primary = _primary_path(item_dir, item.filename, item.extension)
         if skip_existing and os.path.isfile(primary):
             result.skipped.append(primary)
             if progress:
@@ -772,7 +791,7 @@ def download_images(
                     "image_skipped_progress", index=i + 1, total=total))
             continue
         path = primary if not os.path.exists(primary) else _unique_path(
-            save_dir, item.filename, item.extension)
+            item_dir, item.filename, item.extension)
         part = path + ".part"
 
         def _cleanup_part():

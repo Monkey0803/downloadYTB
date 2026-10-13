@@ -991,10 +991,12 @@ class VideoPanel(TFrame):
         return download_dir_key(self.platform, kind)
 
     def _download_dir(self):
-        """本次下载实际用的目录：开启「每个帖子单独建子文件夹」时再套一层。"""
+        """本次下载实际用的目录：开启分组时套帖子目录 + 媒体类型子目录。"""
+        kind = "audio" if self.mode_var.get() == "audio" else "video"
         return self.app._post_download_dir(
             self.app.default_save_dir(self._save_dir_key()),
-            getattr(self._info, "url", ""), getattr(self._info, "title", ""))
+            getattr(self._info, "url", ""), getattr(self._info, "title", ""),
+            kind=kind)
 
     def on_choose_dir(self):
         path = filedialog.askdirectory(initialdir=self.dir_var.get() or core.DEFAULT_SAVE_DIR)
@@ -1709,6 +1711,13 @@ class ImagePanel(TFrame):
             getattr(self._post, "url", ""), getattr(self._post, "title", ""),
             fallback_id=getattr(self._post, "post_id", ""))
 
+    def _group_by_type(self):
+        """是否让引擎按媒体类型分目录（仅在确实用了帖子目录时）。"""
+        if not self.app.group_by_post_enabled():
+            return False
+        base = self.app.default_save_dir(self._save_dir_key())
+        return self._download_dir() != base
+
     def on_paste(self):
         try:
             text = self.clipboard_get()
@@ -1877,6 +1886,7 @@ class ImagePanel(TFrame):
         # 也记录手动输入的路径，而不只记录目录选择器选出的路径。
         self.app.apply_download_dir(self._save_dir_key(), self.dir_var.get().strip())
         save_dir = self._download_dir()
+        group_by_type = self._group_by_type()
         self._last_paths = []
         self.open_btn.configure_state("disabled")
         self.open_file_btn.configure_state("disabled")
@@ -1903,7 +1913,8 @@ class ImagePanel(TFrame):
                     sel, save_dir=save_dir, progress=on_progress,
                     cancel_event=cancel_event,
                     skip_existing=bool(self.app.settings.get(
-                        "skip_existing_images", True)))
+                        "skip_existing_images", True)),
+                    group_by_type=group_by_type)
             except images.ImageCancelled:
                 self.after(0, self._download_cancelled)
             except images.ImageError as exc:
@@ -3235,17 +3246,21 @@ class App(tk.Tk):
         """是否把同一个帖子的文件放进以帖子 ID 命名的子文件夹。"""
         return bool(self.settings.get("group_by_post", False))
 
-    def _post_download_dir(self, base, url, title="", fallback_id=""):
-        """按设置决定本次下载的实际目录（开启时在 base 下再套一层帖子目录）。
+    def _post_download_dir(self, base, url, title="", fallback_id="", kind=""):
+        """按设置决定本次下载的实际目录。
 
-        帖子 ID 以**链接**为准：同一帖子的图片流程与视频流程才会算出同一个目录。
-        链接里没有 ID 时才用探测结果兜底（例如短链跳转后的帖子）。
+        开启后：``base/<帖子 ID>_<标题摘要>/``，再按媒体类型分（``image``/``gif``/
+        ``video``/``audio``）。帖子 ID 以**链接**为准：同一帖子的图片流程与视频流程
+        才会算出同一个目录；链接里没有 ID 时才用探测结果兜底。
         """
         if not self.group_by_post_enabled():
             return base
         post_id = images.post_id_from_url(url) or fallback_id
         folder = post_folder_name(post_id, title)
-        return os.path.join(base, folder) if folder else base
+        if not folder:
+            return base
+        path = os.path.join(base, folder)
+        return os.path.join(path, kind) if kind else path
 
     def queue_autostart_enabled(self):
         return bool(self.settings.get("queue_autostart", True))

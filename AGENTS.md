@@ -102,8 +102,16 @@ state.
 ## One Folder Per Post
 
 `settings["group_by_post"]` (off by default) puts a post's files into
-`<save dir>/<post ID>_<title summary>/`. It is applied in `App._post_download_dir()`, which both
-the video and the image panel call through their own `_download_dir()`.
+`<save dir>/<post ID>_<title summary>/`, and inside that into a **media-type folder**:
+`image/`, `gif/`, `video/` (or `audio/` for audio-only video downloads). `App._post_download_dir()`
+builds the post folder and takes an optional `kind=` for the type layer; the video panel passes
+its own kind, while the image panel leaves it empty because **one image download can mix types** —
+a Weibo GIF post yields both `.gif` and `.mp4` items in a single call, so the bucketing has to
+happen per item inside `images.download_images(..., group_by_type=True)` (`images.media_bucket()`).
+
+The bucket names are ASCII and deliberately **not** routed through i18n: a folder name that
+followed the UI language would shift every recorded path (and break duplicate detection) the
+moment the user switches language.
 
 Two rules keep it predictable:
 
