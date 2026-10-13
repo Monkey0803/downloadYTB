@@ -22,7 +22,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import (browser_cookies, core, diagnostics, i18n, images, menubar,
+from . import (applog, browser_cookies, core, diagnostics, i18n, images, menubar,
                ytdlp_update,
                platforms, settings, taskbar, theme, windowing)
 from .widgets import (
@@ -1056,6 +1056,7 @@ class VideoPanel(TFrame):
         threading.Thread(target=work, daemon=True).start()
 
     def _probe_failed(self, msg):
+        applog.log_event("probe_failed", panel=self.platform, error=msg)
         self._busy = False
         self.probe_btn.configure_state("normal")
         self.download_btn.configure_state("normal")
@@ -1485,6 +1486,7 @@ class VideoPanel(TFrame):
         self._set_status(i18n.tr("cancelled_cleaned"))
 
     def _download_failed(self, msg):
+        applog.log_event("download_failed", panel=self.platform, error=msg)
         self._reset_after_download()
         self.progress.set(0)
         _taskbar_clear(self.app)
@@ -1493,6 +1495,7 @@ class VideoPanel(TFrame):
     def _download_done(self, result):
         self._reset_after_download()
         paths = [p for p in (result if isinstance(result, (list, tuple)) else [result]) if p]
+        applog.log_event("download_done", panel=self.platform, files=paths)
         self._last_file = paths[0] if paths else None
         self.open_btn.configure_state("normal")
         if paths:
@@ -1797,6 +1800,7 @@ class ImagePanel(TFrame):
         self._on_selection_change()
 
     def _probe_failed(self, msg):
+        applog.log_event("probe_failed", panel=self.platform, error=msg)
         self._busy = False
         self.probe_btn.configure_state("normal")
         self._clear_results()
@@ -1951,6 +1955,7 @@ class ImagePanel(TFrame):
         self._set_status(i18n.tr("cancelled_images") + suffix)
 
     def _download_failed(self, msg):
+        applog.log_event("download_failed", panel=self.platform, error=msg)
         self._reset_after_download()
         self.progress.set(0)
         _taskbar_clear(self.app)
@@ -1960,6 +1965,9 @@ class ImagePanel(TFrame):
         # 跳过（已存在）的文件也算「能找到的产物」，否则全部跳过时
         #「打开所在文件夹」会没有目标。
         self._last_paths = list(result.paths) + list(result.skipped)
+        applog.log_event("images_done", panel=self.platform,
+                         files=self._last_paths,
+                         skipped=len(result.skipped))
         self._reset_after_download()
         self.progress.set(0)
         self.open_btn.configure_state("normal")
@@ -2703,6 +2711,10 @@ class SettingsPage(TFrame):
                                    command=self._copy_diagnostics,
                                    font=f.f_btn, width=140, bg_role="CARD")
         self.diag_btn.pack(side="left")
+        self.log_btn = PillButton(diag_row, i18n.tr("open_log"),
+                                  command=self._open_log, font=f.f_btn, width=110,
+                                  bg_role="CARD")
+        self.log_btn.pack(side="left", padx=(8, 0))
         self.diag_status = TLabel(diag_row, text="", font=f.f_small,
                                   bg_role="CARD", fg_role="TEXT_SUB")
         self.diag_status.pack(side="left", padx=(10, 0))
@@ -2789,6 +2801,8 @@ class SettingsPage(TFrame):
         if token != getattr(self, "_cookie_probe_token", 0) or not self.winfo_exists():
             return
         self._cookie_probe = result
+        applog.log_event("cookie_probe", status=result.status,
+                         count=getattr(result, "cookie_count", 0))
 
         if result.status == browser_cookies.PROBE_OK:
             self.cookie_status_label.set_fg_role("OK")
@@ -2826,6 +2840,28 @@ class SettingsPage(TFrame):
             subprocess.Popen(["open", browser_cookies.FDA_SETTINGS_URL])
         except OSError:
             pass
+
+    def _open_log(self):
+        """在文件管理器里定位日志文件；还没有日志就先写一行把它建出来。"""
+        path = applog.log_path()
+        try:
+            if not os.path.isfile(path):
+                applog.log_event("log_created")
+            if os.path.isfile(path):
+                open_in_file_manager(path)
+                self._log_status(i18n.tr("log_opened", name=os.path.basename(path)),
+                                 ok=True)
+            else:
+                self._log_status(i18n.tr("log_unavailable"), ok=False)
+        except Exception as exc:      # 打开失败也不该让界面崩掉
+            self._log_status(i18n.tr("log_unavailable"), ok=False)
+            applog.log_exception("log_open_failed", exc)
+
+    def _log_status(self, text, ok=True):
+        if not self.winfo_exists():
+            return
+        self.diag_status.set_fg_role("TEXT_SUB" if ok else "ERROR")
+        self.diag_status.configure(text=text)
 
     def _copy_diagnostics(self):
         """把诊断报告复制到剪贴板（生成过程可能较慢，放后台线程）。"""
@@ -3054,6 +3090,7 @@ class SettingsPage(TFrame):
                 text=i18n.tr("ytdlp_is_latest", version=version))
             return
         self._ytdlp_pending = (version, url)
+        applog.log_event("ytdlp_update_available", version=version)
         self.ytdlp_btn.set_text(i18n.tr("ytdlp_update_to", version=version))
         self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_found", version=version))
 
@@ -3084,6 +3121,7 @@ class SettingsPage(TFrame):
         if error:
             self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_failed", message=error))
             return
+        applog.log_event("ytdlp_installed", version=version)
         self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_updated", version=version))
         self._ytdlp_refresh()
 
@@ -3903,6 +3941,7 @@ class App(tk.Tk):
 
     def _on_close_window(self):
         """关闭窗口（红色按钮）→ 隐藏窗口，应用保留在 menubar 运行。"""
+        applog.log_event("window_hidden")
         self.withdraw()
 
     def paste_from_menubar(self):
@@ -3944,7 +3983,19 @@ class App(tk.Tk):
             return
         self.after(200, lambda: self._wait_downloads_then_destroy(tries - 1))
 
+    def report_callback_exception(self, exc_type, exc_value, exc_tb):
+        """回调里未捕获的异常：写进日志，再留给 Tk 默认处理（打印到 stderr）。
+
+        「App 突然没反应」这类问题只能靠这里留下的记录定位。
+        """
+        where = ""
+        if exc_tb is not None and getattr(exc_tb, "tb_frame", None) is not None:
+            where = getattr(exc_tb.tb_frame.f_code, "co_name", "")
+        applog.log_exception("unhandled_exception", exc_value, where=where)
+        super().report_callback_exception(exc_type, exc_value, exc_tb)
+
     def _destroy_app(self):
+        applog.log_event("app_exit")
         self._save_window_geometry()
         if self._native_scroll_monitor is not None:
             try:
@@ -4160,6 +4211,13 @@ class App(tk.Tk):
 
 def run():
     app = App()
+    from . import __version__
+
+    applog.log_event("app_start", version=__version__, platform=sys.platform,
+                     frozen=bool(getattr(sys, "frozen", False)),
+                     ytdlp=ytdlp_update.active_version()[0],
+                     ytdlp_source=ytdlp_update.active_source(),
+                     save_dir=app.settings.get("save_dir", ""))
     # 验证钩子：环境变量指向的脚本在 App 创建后执行（命名空间含 app），
     # 用于打包态自动化验证（截图/切换设置）。日常使用不受影响。
     script = os.environ.get("VD_TEST_SCRIPT")

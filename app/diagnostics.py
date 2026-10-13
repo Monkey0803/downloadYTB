@@ -22,9 +22,18 @@ _last_error = ""
 
 
 def record_error(text: str) -> None:
-    """记录界面最近一次展示的错误（面板出错时调用）。"""
+    """记录界面最近一次展示的错误（面板出错时调用）。
+
+    除了留在内存里供「复制诊断信息」引用，同时写进日志文件——用户重启后还能取到。
+    """
     global _last_error
     _last_error = (text or "").strip()[:1000]
+    try:
+        from . import applog
+
+        applog.log_event("ui_error", message=_last_error)
+    except Exception:
+        pass
 
 
 def last_error() -> str:
@@ -48,6 +57,16 @@ def _dependency_version(module_name: str) -> str:
     if version:
         return str(version)
     return str(getattr(module, "__version__", i18n.tr("diag_unknown")))
+
+
+def _log_line() -> str:
+    """日志文件位置（家目录替换成 ~）；只报路径，不带内容。"""
+    try:
+        from . import applog
+
+        return _sanitize(applog.log_path())
+    except Exception:
+        return i18n.tr("diag_unknown")
 
 
 def _ytdlp_line() -> str:
@@ -133,6 +152,7 @@ def build_report(settings: dict = None, probe=None) -> str:
         i18n.tr("diag_gallerydl", value=_dependency_version("gallery_dl")),
         i18n.tr("diag_ffmpeg", value=_ffmpeg_line()),
         i18n.tr("diag_save_dir", value=_save_dir_line(settings)),
+        i18n.tr("diag_log_path", value=_log_line()),
     ]
     lines.extend(_cookie_lines(probe))
 

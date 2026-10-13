@@ -67,6 +67,24 @@ during a test run, where `wait_window()` would hang the suite instead of failing
 `App.needs_onboarding()` requires `_first_run` and an unset `onboarding_done`; dismissing the
 dialog (either button or the window close) persists `onboarding_done` exactly once.
 
+## Local Log
+
+`app/applog.py` writes one line per event to `<data dir>/logs/videodownloader.log`, rotating
+at 1 MB and keeping three older files. Three rules: it must **never raise** (a full disk or a
+read-only directory cannot be allowed to break a download), it must **not record secrets**
+(keys containing cookie/token/secret/password are redacted, and URLs keep only the path
+because tokens hide in query strings), and it must stay **bounded** (rotation).
+
+Wired at: app start/exit, window hide, unhandled Tk callback exceptions
+(`report_callback_exception`), probe/download failures and completions, cookie probe results,
+yt-dlp update results, and `diagnostics.record_error` (the in-memory "last error" is now
+persisted too).
+
+Runs where the main module is named `test_*.py` are redirected to `logs/test/`: without that,
+one suite run wrote sixteen lines into the user's real log, including
+`panel=<Mock name='mock.platform' …>` noise. The diagnostics report carries the log **path**
+only, never its content.
+
 ## Updating yt-dlp
 
 The packaged yt-dlp is frozen at build time, so a site change breaks every download until a
