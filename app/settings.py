@@ -34,6 +34,8 @@ DEFAULTS = {
     "download_history": [],
     # 下载队列：最新的排在后面，逐项执行；只存 URL 与平台
     "download_queue": [],
+    # 每个帖子单独建子文件夹（默认关闭：开了会改变既有目录结构）
+    "group_by_post": False,
     "queue_autostart": True,    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint
 }

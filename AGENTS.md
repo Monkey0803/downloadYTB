@@ -99,6 +99,27 @@ never fight over one progress bar. Panels call `App.notify_download_finished()` 
 synchronously inside a panel's own reset would re-enter the download flow and corrupt its
 state.
 
+## One Folder Per Post
+
+`settings["group_by_post"]` (off by default) puts a post's files into
+`<save dir>/<post ID>_<title summary>/`. It is applied in `App._post_download_dir()`, which both
+the video and the image panel call through their own `_download_dir()`.
+
+Two rules keep it predictable:
+
+- **The post ID comes from the link, not from the probe result.** `images.post_id_from_url()` is
+  the single source of truth, so the image flow and the video flow for the same pasted URL compute
+  the same folder — otherwise a post with both a video and GIFs would split across two folders.
+  The probe's `post_id` is only a fallback for links with no recognisable ID.
+- The folder name must be **stable**: `images._primary_path()` is what detects already-downloaded
+  images, so a non-deterministic name would re-download everything. That is why the title is
+  truncated and sanitised but the ID is mandatory (no ID → no grouping).
+
+Known trade-off: Weibo PC links carry the base62 `mblogid` (`Rmr4XxLMD`), which matches the image
+file names, while mobile links only carry the numeric mid — the same post opened through the two
+link forms lands in two different folders. The title can also be edited by the author, which
+yields a new folder.
+
 ## Colours And Text Size
 
 `test_contrast.py` computes WCAG contrast for every text-on-background pair in both

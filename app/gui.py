@@ -108,6 +108,25 @@ def is_weibo_video_url(url: str):
     return "/tv/show/" in low or "video.weibo.com/show" in low
 
 
+def _sanitize_filename(text: str) -> str:
+    """把标题里的路径分隔符、控制字符等清掉，避免生成非法目录名。"""
+    cleaned = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", str(text or ""))
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def post_folder_name(post_id: str, title: str = "") -> str:
+    """「每个帖子单独建子文件夹」用的目录名：``<帖子 ID>_<标题摘要>``。
+
+    只用帖子 ID 不好认，所以附上标题摘要；取不到标题时退回纯 ID，取不到 ID 时返回
+    空串（表示不分组）。标题若被作者修改，会落到新目录——取舍见 AGENTS。
+    """
+    pid = _sanitize_filename(post_id)
+    if not pid:
+        return ""
+    summary = _sanitize_filename(title)[:40].strip(" ._-")
+    return f"{pid}_{summary}" if summary else pid
+
+
 def platform_label(platform: str) -> str:
     """把 ASCII 平台键翻成界面上的平台名；未知值原样返回。
 
@@ -971,6 +990,12 @@ class VideoPanel(TFrame):
         kind = "audio" if self.mode_var.get() == "audio" else "video"
         return download_dir_key(self.platform, kind)
 
+    def _download_dir(self):
+        """本次下载实际用的目录：开启「每个帖子单独建子文件夹」时再套一层。"""
+        return self.app._post_download_dir(
+            self.app.default_save_dir(self._save_dir_key()),
+            getattr(self._info, "url", ""), getattr(self._info, "title", ""))
+
     def on_choose_dir(self):
         path = filedialog.askdirectory(initialdir=self.dir_var.get() or core.DEFAULT_SAVE_DIR)
         if path:
@@ -1179,7 +1204,7 @@ class VideoPanel(TFrame):
         audio_option = self._audio_option_for_label(self.quality_var.get())
         self._dl_params = {
             "url": self._info.url,
-            "save_dir": self.app.default_save_dir(self._save_dir_key()),
+            "save_dir": self._download_dir(),
             "audio_only": self.mode_var.get() == "audio",
             "height": (None if self.mode_var.get() == "audio"
                        else self._height_for_label(self.quality_var.get())),
@@ -1677,6 +1702,13 @@ class ImagePanel(TFrame):
             return download_dir_key(self.platform, "media")
         return download_dir_key(self.platform, "image")
 
+    def _download_dir(self):
+        """本次下载实际用的目录：开启「每个帖子单独建子文件夹」时再套一层。"""
+        return self.app._post_download_dir(
+            self.app.default_save_dir(self._save_dir_key()),
+            getattr(self._post, "url", ""), getattr(self._post, "title", ""),
+            fallback_id=getattr(self._post, "post_id", ""))
+
     def on_paste(self):
         try:
             text = self.clipboard_get()
@@ -1844,7 +1876,7 @@ class ImagePanel(TFrame):
         cancel_event = self._cancel_event
         # 也记录手动输入的路径，而不只记录目录选择器选出的路径。
         self.app.apply_download_dir(self._save_dir_key(), self.dir_var.get().strip())
-        save_dir = self.app.default_save_dir(self._save_dir_key())
+        save_dir = self._download_dir()
         self._last_paths = []
         self.open_btn.configure_state("disabled")
         self.open_file_btn.configure_state("disabled")
@@ -2566,6 +2598,16 @@ class SettingsPage(TFrame):
         _pack_wrapped_hint(bdk, app, i18n.tr("skip_existing_hint"),
                            bg_role="CARD", pady=(6, 0))
 
+        self.group_post_var = tk.BooleanVar(
+            value=bool(app.settings.get("group_by_post", False)))
+        self.group_post_var.trace_add("write", lambda *a: self._on_group_by_post_change())
+        CheckPill(bdk, i18n.tr("group_by_post"), self.group_post_var,
+                  font=f.f_btn, bg_role="CARD",
+                  width=_check_pill_width(f.f_btn, i18n.tr("group_by_post"))
+                  ).pack(anchor="w", pady=(10, 0))
+        _pack_wrapped_hint(bdk, app, i18n.tr("group_by_post_hint"),
+                           bg_role="CARD", pady=(6, 0))
+
         self.dock_var = tk.BooleanVar(value=bool(app.settings.get("dock_status", True)))
         self.dock_var.trace_add("write", lambda *a: self._on_dock_status_change())
         CheckPill(bdk, i18n.tr("dock_status"), self.dock_var,
@@ -2928,6 +2970,10 @@ class SettingsPage(TFrame):
             # 关掉/改成自动后，残留的建议条要收起来
             self.app._hide_clipboard_suggestion()
 
+    def _on_group_by_post_change(self):
+        self.app.settings["group_by_post"] = bool(self.group_post_var.get())
+        settings.save(self.app.settings)
+
     def _on_skip_existing_change(self):
         self.app.settings["skip_existing_images"] = bool(self.skip_var.get())
         settings.save(self.app.settings)
@@ -3184,6 +3230,22 @@ class App(tk.Tk):
 
     def clear_queue(self):
         self.set_queue_items([])
+
+    def group_by_post_enabled(self):
+        """是否把同一个帖子的文件放进以帖子 ID 命名的子文件夹。"""
+        return bool(self.settings.get("group_by_post", False))
+
+    def _post_download_dir(self, base, url, title="", fallback_id=""):
+        """按设置决定本次下载的实际目录（开启时在 base 下再套一层帖子目录）。
+
+        帖子 ID 以**链接**为准：同一帖子的图片流程与视频流程才会算出同一个目录。
+        链接里没有 ID 时才用探测结果兜底（例如短链跳转后的帖子）。
+        """
+        if not self.group_by_post_enabled():
+            return base
+        post_id = images.post_id_from_url(url) or fallback_id
+        folder = post_folder_name(post_id, title)
+        return os.path.join(base, folder) if folder else base
 
     def queue_autostart_enabled(self):
         return bool(self.settings.get("queue_autostart", True))

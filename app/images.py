@@ -108,6 +108,9 @@ class ImagePost:
     author: str
     items: List[ImageItem] = field(default_factory=list)
     warning: str = ""  # 非致命的降级提示（如浏览器 Cookie 读取失败后改用匿名解析）
+    # 平台侧帖子 ID（取不到时为空）。「每个帖子单独建子文件夹」用它命名目录，
+    # 所以只依赖链接内容、同一帖子每次解析结果一致。
+    post_id: str = ""
 
     @property
     def has_video(self) -> bool:
@@ -150,6 +153,11 @@ _WEIBO_STATUS_RE = re.compile(
 )
 _WEIBO_DESKTOP_STATUS_RE = re.compile(
     r"weibo\.com/(?:u/)?\d+/(?P<short>[0-9A-Za-z]+)",
+    re.IGNORECASE,
+)
+# status/detail 后面既可能是数字 mid、也可能是 base62 短 ID（移动端两种都在用）
+_WEIBO_ANY_STATUS_RE = re.compile(
+    r"weibo\.(?:cn|com)/(?:status|detail)/(?P<id>[0-9A-Za-z]+)",
     re.IGNORECASE,
 )
 _WEIBO_BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -574,7 +582,39 @@ def _probe_weibo_images(url: str) -> ImagePost:
         raise ImageError(i18n.tr("error_no_images", suffix=""))
 
     return ImagePost(url=url, title=title[:120], author=author, items=items,
-                     warning=cookie_fallback)
+                     warning=cookie_fallback, post_id=mblog_id)
+
+
+# 帖子 ID 的识别规则：只依赖链接本身（结果稳定，图片流程与视频流程能算出同一个目录）
+_POST_ID_PATTERNS = (
+    re.compile(r"(?:twitter|x)\.com/[^/]+/status/(?P<id>\d+)"),
+    re.compile(r"instagram\.com/(?:p|reel|reels|tv)/(?P<id>[A-Za-z0-9_-]+)"),
+)
+
+
+def post_id_from_url(url: str) -> str:
+    """从帖子链接取出平台侧 ID；取不到（例如 YouTube 单条视频）返回空串。
+
+    微博优先用 PC 链接里那段 base62（如 ``Rmr4XxLMD``）：它既和图片文件名里的
+    ``mblogid`` 一致、也便于人认。移动端链接只有数字 mid，就退而用数字——
+    两种链接指向同一帖子时会得到不同目录，取舍见 AGENTS。
+    """
+    text = (url or "").strip()
+    if not text:
+        return ""
+    if _is_weibo_url(text):
+        desktop = _WEIBO_DESKTOP_STATUS_RE.search(text)
+        if desktop:
+            return desktop.group("short")
+        any_status = _WEIBO_ANY_STATUS_RE.search(text)
+        if any_status:
+            return any_status.group("id")
+        return _weibo_status_id(text, None) or ""
+    for pattern in _POST_ID_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group("id")
+    return ""
 
 
 def probe_images(url: str) -> ImagePost:
@@ -648,7 +688,8 @@ def probe_images(url: str) -> ImagePost:
         raise ImageError(i18n.tr("error_no_images", suffix=suffix))
 
     title = re.sub(r"\s+", " ", title).strip()
-    return ImagePost(url=url, title=title[:120], author=author, items=items)
+    return ImagePost(url=url, title=title[:120], author=author, items=items,
+                     post_id=post_id_from_url(url))
 
 
 def fetch_image_bytes(url: str, max_bytes: int = 8 * 1024 * 1024,
