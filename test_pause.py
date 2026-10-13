@@ -39,8 +39,13 @@ class CaptureLogger:
 _orig_base_opts = core._base_opts
 
 
-def _patched_base_opts():
-    opts = _orig_base_opts()
+def _patched_base_opts(*args, **kwargs):
+    """转发参数，别写死签名。
+
+    原来是无参包装，`core._base_opts` 后来加了 `platform` 参数，这里就抛
+    TypeError，整个暂停验证脚本静默失效（它需要联网，CI 不跑，所以没被及时发现）。
+    """
+    opts = _orig_base_opts(*args, **kwargs)
     opts["logger"] = CaptureLogger()
     return opts
 

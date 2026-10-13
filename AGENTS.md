@@ -56,7 +56,7 @@ then invoke it on the main thread) to verify the result path. `test_video_panel.
 check `winfo_exists()` first: the user can close the picker while a probe is in flight,
 and a stale callback then raises `TclError: bad window path name`.
 
-GUI scripts such as `test_smoke_ui.py` require Tk; `test_core.py`, `test_images.py`, and several GUI flows use live services and may require valid URLs, login cookies, and network access. Use a dedicated test download directory and never include private URLs or cookies in fixtures.
+GUI scripts such as `test_smoke_ui.py` require Tk; `test_core.py`, `test_images.py`, `test_pause.py` (pause/resume against a real video), and several GUI flows use live services and may require valid URLs, login cookies, and network access. Use a dedicated test download directory and never include private URLs or cookies in fixtures.
 
 ## First-Run Onboarding
 
