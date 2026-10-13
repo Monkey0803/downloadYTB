@@ -137,6 +137,7 @@ jobs:
       - name: Generate release notes
         run: |
           python3 build/release_notes.py "$RELEASE_TAG" --output release-notes.md \
+            || python3 build/release_notes.py --install-only --output release-notes.md \
             || echo "提交说明生成失败，本版改动见下方 changelog 链接。" > release-notes.md
           echo "--- release-notes.md 预览 ---"
           head -20 release-notes.md

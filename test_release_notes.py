@@ -5,8 +5,10 @@
 生成器改为读提交信息，这些用例锁住它的解析与排版行为。
 """
 
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -201,6 +203,75 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertNotIn("提升版本号", notes)
         # 每个提交正文的要点都要展开，否则说明就只有一行标题
         self.assertGreater(notes.count("\n  - "), 10)
+
+
+class InstallSectionTests(unittest.TestCase):
+    """安装说明必须出现在每份说明里（免签名应用的首启门槛）。"""
+
+    def _notes(self, *records):
+        commits = rn.parse_commits(log(*records)) if records else []
+        return rn.build_notes(commits, "v9.9.9", "v9.9.8", "o/r")
+
+    def test_present_even_with_commits(self):
+        notes = self._notes(("feat(repo): 新功能", "- 细节"))
+        self.assertIn("## 安装 / Installation", notes)
+
+    def test_present_even_without_any_commit(self):
+        """标签区间为空时也必须附上指引——那正是用户最需要它的时候。"""
+        self.assertIn("## 安装 / Installation", self._notes())
+
+    def test_covers_all_three_platform_hints(self):
+        notes = self._notes(("fix(repo): 修个问题", "- 细节"))
+        self.assertIn("xattr -dr com.apple.quarantine", notes)
+        self.assertIn("Run anyway", notes)
+        self.assertIn("chmod +x VideoDownloader", notes)
+        for asset in ("macos-arm64", "windows-x64", "linux-x64"):
+            self.assertIn(asset, notes, asset)
+
+    def test_is_bilingual_and_says_it_is_not_corruption(self):
+        notes = self._notes(("fix(repo): 修个问题", "- 细节"))
+        self.assertIn("不是文件损坏", notes)
+        self.assertIn("not** a corrupted download", notes)
+
+    def test_sits_after_the_changelog(self):
+        notes = self._notes(("feat(repo): 新功能", "- 细节"))
+        self.assertLess(notes.index("Full Changelog"), notes.index("## 安装"))
+
+    def test_install_only_prints_just_the_section(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "build" / "release_notes.py"), "--install-only"],
+            capture_output=True, text=True, cwd=ROOT, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("## 安装 / Installation", result.stdout)
+        self.assertNotIn("Full Changelog", result.stdout)
+        self.assertNotIn("## 新增", result.stdout)
+
+    def test_install_only_works_without_a_git_repository(self):
+        """CI 的兜底路径：说明生成失败时用它救场，不能依赖仓库或标签。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "build" / "release_notes.py"),
+                 "--install-only"],
+                capture_output=True, text=True, cwd=tmp, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("xattr -dr com.apple.quarantine", result.stdout)
+
+    def test_install_only_writes_the_output_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "release-notes.md")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "build" / "release_notes.py"),
+                 "--install-only", "--output", target],
+                capture_output=True, text=True, cwd=ROOT, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with open(target, encoding="utf-8") as handle:
+                self.assertIn("## 安装 / Installation", handle.read())
+
+    def test_workflow_falls_back_to_the_install_section(self):
+        """CI 的回退链里必须保留安装说明，否则一次生成故障就把它弄丢了。"""
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("--install-only --output release-notes.md", workflow)
 
 
 if __name__ == "__main__":

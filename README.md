@@ -58,6 +58,22 @@
 
 平台接口会变化，因此“支持”表示代码提供对应的解析和下载路径，不代表任何链接、地区、账号状态或网络环境下都一定可用。
 
+## 下载与首次打开
+
+发布包在 [Releases](https://github.com/Monkey0803/downloadYTB/releases) 页面，按平台选：
+`macos-arm64`（Apple 芯片）、`windows-x64`、`linux-x64`。
+
+解压后的**第一次打开会被系统拦一下**——这是免签名应用的标准提示，**不是文件损坏**：
+
+| 平台 | 首次打开被拦住时怎么做 |
+| --- | --- |
+| macOS | 在「应用程序」里**右键点图标 → 打开**，再点一次「打开」；或执行 `xattr -dr com.apple.quarantine /Applications/VideoDownloader.app` |
+| Windows | SmartScreen 提示「Windows 已保护你的电脑」→「更多信息」→「仍要运行」 |
+| Linux | `chmod +x VideoDownloader` 后运行 |
+
+macOS 产物目前是 ad-hoc 签名（未做 Apple 公证），Windows 产物未做代码签名，因此会出现上述
+提示；两者都不影响功能。每份 Release 说明末尾也会附上这段指引。
+
 ## 项目结构
 
 ~~~text

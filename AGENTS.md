@@ -299,12 +299,18 @@ v1.1.0–v1.7.0. The publish job instead runs `build/release_notes.py`, which re
 messages (already enforced by the commit-msg hook), groups them by type, and expands each
 commit body's `- ` bullets into sub-items.
 
+A fixed install section (macOS Gatekeeper / Windows SmartScreen / Linux `chmod`) is appended
+to every release body: the builds are unsigned, so the first launch is always blocked and that
+guidance used to live only in the developer docs. `--install-only` prints just that section and
+needs no repository or tag, which is why the workflow's fallback chain uses it — a notes bug can
+no longer hide the instructions.
+
 Two constraints keep it working:
 
 - The `publish-release` job must check out with `fetch-depth: 0` **and** `fetch-tags: true`.
   With the default depth of 1 there is no previous tag, so the notes silently come out
   empty — verified by running the generator in a `--depth 1` clone, which found 0 items.
-- Failures fall back to a minimal body so a notes bug never blocks publishing assets.
+- Failures fall back to the install section first and a minimal body second, so a notes bug never blocks publishing assets — and never hides the first-launch instructions.
 
 Preview the notes for any range before tagging:
 

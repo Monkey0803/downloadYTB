@@ -52,6 +52,24 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 
 “Supported” means that the project contains a parser and download path for the platform. It does not guarantee that every URL works under every account, region, network, or rate-limit condition.
 
+## Download and first launch
+
+Release archives live on the [Releases](https://github.com/Monkey0803/downloadYTB/releases)
+page — pick `macos-arm64` (Apple silicon), `windows-x64` or `linux-x64`.
+
+The **first launch is blocked by the OS** because the builds are unsigned; that is expected and
+**not** a corrupted download:
+
+| Platform | If the first launch is blocked |
+| --- | --- |
+| macOS | Right-click the app in Applications → **Open**, then Open again; or run `xattr -dr com.apple.quarantine /Applications/VideoDownloader.app` |
+| Windows | On the SmartScreen prompt choose **More info** → **Run anyway** |
+| Linux | `chmod +x VideoDownloader`, then run it |
+
+macOS builds are ad-hoc signed (no Apple notarisation) and Windows builds are unsigned, which is
+why the warnings appear; functionality is unaffected. The same instructions are appended to every
+Release's notes.
+
 ## Repository layout
 
 ~~~text
