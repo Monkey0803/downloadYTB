@@ -330,6 +330,12 @@ T = {
     "images_complete_skipped": {"zh_CN": "已完成 {n} 张，跳过 {skipped} 张已存在（{folder}）", "zh_TW": "已完成 {n} 張，略過 {skipped} 張已存在（{folder}）", "en": "Downloaded {n}, skipped {skipped} already present ({folder})", "ko": "{n}장 완료, 이미 있던 {skipped}장 건너뜀 ({folder})", "ja": "{n}枚完了、既存の{skipped}枚をスキップ（{folder}）"},
     "images_all_skipped": {"zh_CN": "{n} 张图片都已存在，未重复下载", "zh_TW": "{n} 張圖片都已存在，未重複下載", "en": "All {n} images already exist; nothing was re-downloaded", "ko": "{n}장 모두 이미 있어 다시 받지 않았습니다", "ja": "{n}枚とも既に存在するため再ダウンロードしていません"},
     "image_done_progress": {"zh_CN": "已完成 {index}/{total} 张", "zh_TW": "已完成 {index}/{total} 張", "en": "Completed {index}/{total}", "ko": "{index}/{total}장 완료", "ja": "{index}/{total}枚完了"},
+    "ytdlp_bad_wheel": {"zh_CN": "下载到的文件不是有效的 yt-dlp 包", "zh_TW": "下載到的檔案不是有效的 yt-dlp 套件", "en": "The downloaded file is not a valid yt-dlp package", "ko": "내려받은 파일이 올바른 yt-dlp 패키지가 아닙니다", "ja": "ダウンロードしたファイルが有効な yt-dlp パッケージではありません"},
+    "ytdlp_bad_version": {"zh_CN": "版本号无法识别", "zh_TW": "版本號無法辨識", "en": "Unrecognised version number", "ko": "버전 번호를 인식할 수 없습니다", "ja": "バージョン番号を認識できません"},
+    "ytdlp_version_mismatch": {"zh_CN": "包内版本（{inner}）与预期（{wheel}）不一致", "zh_TW": "套件內版本（{inner}）與預期（{wheel}）不一致", "en": "Package version ({inner}) does not match the expected one ({wheel})", "ko": "패키지 내부 버전({inner})이 예상({wheel})과 다릅니다", "ja": "パッケージ内のバージョン（{inner}）が想定（{wheel}）と一致しません"},
+    "ytdlp_network_failed": {"zh_CN": "无法连接 PyPI 检查更新：{message}", "zh_TW": "無法連線 PyPI 檢查更新：{message}", "en": "Could not reach PyPI to check for updates: {message}", "ko": "업데이트 확인을 위해 PyPI에 연결할 수 없습니다: {message}", "ja": "更新確認のため PyPI に接続できません：{message}"},
+    "ytdlp_no_wheel": {"zh_CN": "PyPI 没有返回可用的安装包", "zh_TW": "PyPI 沒有回傳可用的安裝包", "en": "PyPI did not return a usable package", "ko": "PyPI가 사용 가능한 패키지를 반환하지 않았습니다", "ja": "PyPI が利用可能なパッケージを返しませんでした"},
+    "ytdlp_download_failed": {"zh_CN": "下载 yt-dlp 失败：{message}", "zh_TW": "下載 yt-dlp 失敗：{message}", "en": "Failed to download yt-dlp: {message}", "ko": "yt-dlp 다운로드 실패: {message}", "ja": "yt-dlp のダウンロードに失敗：{message}"},
     "error_image_download": {"zh_CN": "第 {index} 张图片下载失败：网络错误（{error}）", "zh_TW": "第 {index} 張圖片下載失敗：網路錯誤（{error}）", "en": "Image {index} download failed: network error ({error})", "ko": "이미지 {index} 다운로드 실패: 네트워크 오류 ({error})", "ja": "画像{index}のダウンロードに失敗しました：ネットワークエラー（{error}）"},
 }
 

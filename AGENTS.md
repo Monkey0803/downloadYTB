@@ -67,6 +67,27 @@ during a test run, where `wait_window()` would hang the suite instead of failing
 `App.needs_onboarding()` requires `_first_run` and an unset `onboarding_done`; dismissing the
 dialog (either button or the window close) persists `onboarding_done` exactly once.
 
+## Updating yt-dlp
+
+The packaged yt-dlp is frozen at build time, so a site change breaks every download until a
+new app release ships. `app/ytdlp_update.py` installs the official wheel from PyPI into the
+user data directory and injects it into `sys.path` at startup.
+
+Three constraints, all learned the hard way:
+
+- `activate()` must run **before anything imports `yt_dlp`** (that is why `main.py` calls it
+  before `from app.gui import run`) and must **not import `yt_dlp` itself**: once the module
+  is in `sys.modules`, injecting `sys.path` has no effect and the user's update is silently
+  ignored. `test_ytdlp_update.py` checks this in a subprocess — and the check installs a
+  managed copy there too, because otherwise `activate()` returns early and the assertion
+  passes vacuously (it did, until a negative test caught it).
+- `bundled_dir()` must skip `managed_root()`: after injection, `find_spec("yt_dlp")` resolves
+  to the managed copy, which would make "bundled version" report the *installed* version and
+  put `active_source()` in contradiction with `activate()`.
+- Installation is atomic (extract into a staging dir inside the same parent, verify the
+  package and inner version, then `os.replace`) and zip-slip guarded; any failure leaves the
+  app running on the bundled copy.
+
 ## Platform Identity
 
 A panel's identity (`self.platform`) is the **ASCII key** from `platforms.PLATFORMS`

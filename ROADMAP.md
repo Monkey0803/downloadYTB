@@ -18,7 +18,7 @@
 
 | # | 项目 | 证据 | I | C | E | ICE | 状态 |
 |---|------|------|---|---|---|-----|------|
-| 1 | **打包的 yt-dlp 无法更新**：站点改版后整批下载失败，用户只能重新下载整个 App | `app/core.py:16` 直接 `import yt_dlp`（从打包目录加载，无 `sys.path` 注入）；`app/core.py:280` 注释写着「常因 yt-dlp 版本落后于 YouTube 反爬更新。提示升级或重试」——**但没有任何升级途径** | 5 | 5 | 3 | 8.3 | 待办 |
+| 1 | **打包的 yt-dlp 无法更新**：站点改版后整批下载失败，用户只能重新下载整个 App | `app/core.py:16` 直接 `import yt_dlp`（从打包目录加载，无 `sys.path` 注入）；`app/core.py:280` 注释写着「常因 yt-dlp 版本落后于 YouTube 反爬更新。提示升级或重试」——**但没有任何升级途径** | 5 | 5 | 3 | 8.3 | ✅ 已完成：新增 `app/ytdlp_update.py`（本机安装 + 启动注入）与设置页入口 |
 | 2 | 无持久化日志：出问题后无法取证 | `app/diagnostics.py:24` `record_error` / `:30` `last_error` 只在内存；全项目无 `logging` | 4 | 5 | 2 | 10.0 | 待办 |
 | 3 | 无法批量粘贴多个链接：队列基建已完整，只能一次一个 | `app/gui.py` `VideoPanel.on_enqueue` 只读单个 URL 输入框 | 4 | 5 | 2 | 10.0 | 待办 |
 | 4 | 首次打开被系统安全机制拦住，说明只写在开发者章节 | macOS 只有 ad-hoc 签名（`build/build_macos.sh:37`），README:230 自述「不等于经过 Apple notarization」；Release 说明里没有安装指引 | 4 | 5 | 2 | 10.0 | 待办 |
