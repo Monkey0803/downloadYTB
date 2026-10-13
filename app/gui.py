@@ -24,7 +24,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 from . import (applog, appupdate, browser_cookies, core, diagnostics, i18n, images,
-               menubar, netproxy,
+               menubar, netproxy, postaction,
                ytdlp_update,
                platforms, settings, taskbar, theme, windowing)
 from .widgets import (
@@ -2752,6 +2752,30 @@ class SettingsPage(TFrame):
                            bg_role="CARD", pady=(8, 0))
         self._track_card("subtitles", card_sub, bs)
 
+        # —— 完成后动作 ——
+        card_after = GlassCard(self._scroll_body)
+        card_after.set_height(170)
+        card_after.pack(fill="x", pady=(0, 12))
+        ba = card_after.body
+        TLabel(ba, text=i18n.tr("after_download_card"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        after_row = TFrame(ba, bg_role="CARD")
+        after_row.pack(fill="x", pady=(10, 0))
+        TLabel(after_row, text=i18n.tr("after_download_setting"), font=f.f_body,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+        self.after_download_var = tk.StringVar(
+            value=postaction.label(app.settings.get("after_download")))
+        self.after_download_var.trace_add(
+            "write", lambda *a: self._on_after_download_change())
+        self.after_download_select = PillSelect(
+            after_row, self.after_download_var,
+            values=[postaction.label(code) for code in postaction.OPTIONS],
+            font=f.f_btn, width=190)
+        self.after_download_select.pack(side="left")
+        _pack_wrapped_hint(ba, app, i18n.tr("after_download_hint"),
+                           bg_role="CARD", pady=(8, 0))
+        self._track_card("after_download", card_after, ba)
+
         self._section("settings_section_advanced")
 
         # —— 快捷键 ——
@@ -3145,6 +3169,12 @@ class SettingsPage(TFrame):
         url = getattr(self.app, "_release_url", "") or appupdate.RELEASES_PAGE
         applog.log_event("open_release_page", url=url)
         open_path(url)
+
+    def _on_after_download_change(self):
+        value = postaction.value_for_label(self.after_download_var.get())
+        self.app.settings["after_download"] = value
+        settings.save(self.app.settings)
+        applog.log_event("after_download_setting", action=value)
 
     def _open_log(self):
         """在文件管理器里定位日志文件；还没有日志就先写一行把它建出来。"""
@@ -3752,6 +3782,43 @@ class App(tk.Tk):
         必须延后：在面板自己的复位流程里直接再发起下载会重入，状态会互相踩。
         """
         self.after(200, self.advance_queue)
+        # 排在队列推进之后：队列里还有任务就不该触发「完成后动作」
+        self.after(400, self._maybe_run_after_download)
+
+    def is_idle(self):
+        """没有任何面板在下载、队列里也没有待办。"""
+        if any(getattr(panel, "_busy", False) for panel in self._all_panels()):
+            return False
+        return not self.queue_items()
+
+    def _maybe_run_after_download(self):
+        """下载结束后的后续动作（第 8 项）。
+
+        只在**真正空闲**时触发一次：播放列表或队列还在跑的时候不动作，否则会为每个
+        条目各开一次文件夹窗口。任何失败只记日志，绝不影响应用本体。
+        """
+        code = postaction.normalize(self.settings.get("after_download"))
+        if code == "none" or not self.is_idle():
+            return
+        entry = next(iter(self.download_history()), None)
+        path = str((entry or {}).get("path") or "")
+        if not path or path == getattr(self, "_after_action_path", ""):
+            return                 # 没有新产出，或这一次已经触发过
+        self._after_action_path = path
+        target = os.path.dirname(path) if code == "open_folder" else path
+        try:
+            if code in ("open_folder", "open_file"):
+                open_path(target)
+            elif code == "quit":
+                self.quit_from_menubar()
+                return             # 已经进入退出流程，不再记「完成」
+            elif code == "sleep":
+                if not postaction.run_sleep():
+                    return         # 平台不支持，静默跳过
+        except Exception as exc:
+            applog.log_event("after_download_failed", action=code, error=str(exc))
+            return
+        applog.log_event("after_download", action=code, path=path)
 
     def advance_queue(self, force=False):
         """执行队列里的下一个任务，返回是否真的取了任务。

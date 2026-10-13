@@ -37,6 +37,8 @@ DEFAULTS = {
     # 网络代理（空 = 直连；空时自动采用 HTTP(S)_PROXY 环境变量）
     "proxy": "",
     # 版本与更新：是否自动检查、上次检查时间、已知可用的新版本
+    # 下载完成后的后续动作：none / open_folder / open_file / quit / sleep
+    "after_download": "none",
     "check_updates": True,
     "last_update_check": 0,
     "update_available": "",

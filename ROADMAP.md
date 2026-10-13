@@ -25,7 +25,7 @@
 | 5 | 缩略图线程数无上限：大图集会同时开几十个连接 | `app/gui.py:1859` 对每张图 `Thread(...).start()`（一个 18 图的微博帖即 18 个线程） | 3 | 5 | 2 | 7.5 | ✅ 已完成：改为固定数量守护 worker 从队列取任务；实测放开上限时并发峰值为 20（即原问题） |
 | 6 | 完全不支持代理：受限网络下无法使用 | `app/*.py` 中 `proxy` **零命中**；yt-dlp / gallery-dl / requests 三条网络路径都走直连 | 5 | 4 | 3 | 6.7 | ✅ 已完成：新增 `app/netproxy.py`（校验 + 环境变量回退 + 密码打码），注入 yt-dlp / gallery-dl / requests 三条路径；设置页「网络代理」卡片含「测试连接」 |
 | 7 | 界面不显示版本，也没有新版本提示 | `__version__` 在 `app/gui.py`、`app/menubar.py` 中零引用 | 3 | 4 | 2 | 6.0 | ✅ 已完成：新增 `app/appupdate.py`（GitHub Releases 检查、24 小时节流、可关闭），设置页「版本与更新」卡片 + 菜单栏版本项（有新版变成可点提示） |
-| 8 | 下载完成后没有后续动作 | 无「完成后打开文件夹 / 退出 / 关机」相关代码；`notify_download_finished` 仅用于前进队列 | 3 | 4 | 2 | 6.0 | 待办 |
+| 8 | 下载完成后没有后续动作 | 无「完成后打开文件夹 / 退出 / 关机」相关代码；`notify_download_finished` 仅用于前进队列 | 3 | 4 | 2 | 6.0 | ✅ 已完成：新增 `app/postaction.py`，仅在**真正空闲**（队列也空）时触发一次；实现为睡眠而非关机（关机不可逆） |
 | 9 | 图片下载无法入队 | 队列只加在视频面板（`ImagePanel` 无 `queue_btn`，`test_queue.py` 有断言） | 2 | 4 | 2 | 4.0 | 待办 |
 | 10 | 字幕只存 `.srt`，无嵌入；不保存封面与元数据 | `app/core.py:238` `writesubtitles: True`，无 `FFmpegEmbedSubtitle` / `addmetadata` / `embedthumbnail` | 3 | 4 | 3 | 4.0 | 待办 |
 | 11 | 没有关于对话框（版本、依赖、日志路径、一键复制报告） | 无 About 相关代码；诊断报告已存在但没有集中入口 | 2 | 4 | 2 | 4.0 | 待办 |
