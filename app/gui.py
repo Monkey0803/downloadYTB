@@ -24,6 +24,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 from . import (applog, browser_cookies, core, diagnostics, i18n, images, menubar,
+               netproxy,
                ytdlp_update,
                platforms, settings, taskbar, theme, windowing)
 from .widgets import (
@@ -2787,6 +2788,31 @@ class SettingsPage(TFrame):
         self._track_card("ytdlp", card_ytdlp, by)
         self._ytdlp_refresh()
 
+        # —— 网络代理 ——
+        card_proxy = GlassCard(self._scroll_body)
+        card_proxy.set_height(200)
+        card_proxy.pack(fill="x", pady=(0, 12))
+        bp = card_proxy.body
+        TLabel(bp, text=i18n.tr("proxy_card"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        proxy_row = TFrame(bp, bg_role="CARD")
+        proxy_row.pack(fill="x", pady=(10, 0))
+        self.proxy_var = tk.StringVar(value=str(app.settings.get("proxy", "")))
+        self.proxy_var.trace_add("write", lambda *a: self._on_proxy_change())
+        RoundEntry(proxy_row, textvariable=self.proxy_var,
+                   font=f.f_body).pack(side="left", fill="x", expand=True)
+        self.proxy_test_btn = PillButton(proxy_row, i18n.tr("proxy_test"),
+                                         command=self._test_proxy, font=f.f_btn,
+                                         width=110, bg_role="CARD")
+        self.proxy_test_btn.pack(side="left", padx=(10, 0))
+        self.proxy_status = TLabel(bp, text="", font=f.f_small, bg_role="CARD",
+                                   fg_role="TEXT_SUB")
+        self.proxy_status.pack(anchor="w", pady=(6, 0))
+        _pack_wrapped_hint(bp, app, i18n.tr("proxy_hint"), bg_role="CARD",
+                           pady=(8, 0))
+        self._track_card("proxy", card_proxy, bp)
+        self._refresh_proxy_status()
+
         # —— 诊断与反馈 ——
         card_diag = GlassCard(self._scroll_body)
         card_diag.set_height(150)
@@ -2929,6 +2955,61 @@ class SettingsPage(TFrame):
             subprocess.Popen(["open", browser_cookies.FDA_SETTINGS_URL])
         except OSError:
             pass
+
+    # ---------- 网络代理 ----------
+
+    def _refresh_proxy_status(self):
+        """显示当前**实际生效**的代理（设置优先，其次环境变量）。"""
+        self.proxy_status.set_fg_role("TEXT_SUB")
+        self.proxy_status.configure(
+            text=i18n.tr("proxy_current", value=netproxy.describe()))
+
+    def _on_proxy_change(self):
+        """边输入边校验：非法值不落盘，也不影响当前生效的代理。"""
+        value, error = netproxy.validate(self.proxy_var.get())
+        if error:
+            self.proxy_status.set_fg_role("ERROR")
+            self.proxy_status.configure(text=error)
+            return
+        self.app.settings["proxy"] = value
+        settings.save(self.app.settings)
+        netproxy.set_current(value)
+        applog.log_event("proxy_changed", proxy=netproxy.describe())
+        self._refresh_proxy_status()
+
+    def _test_proxy(self):
+        """用一次轻量请求验证代理是否真的可用（走 yt-dlp 更新器的那条路径）。"""
+        if not self.winfo_exists():
+            return
+        self._proxy_test_token = getattr(self, "_proxy_test_token", 0) + 1
+        token = self._proxy_test_token
+        self.proxy_test_btn.configure_state("disabled")
+        self.proxy_status.set_fg_role("TEXT_SUB")
+        self.proxy_status.configure(text=i18n.tr("proxy_testing"))
+
+        def work():
+            try:
+                version, _url = ytdlp_update.check_latest()
+                error = None
+            except Exception as exc:
+                version = None
+                error = str(exc)
+            self.after(0, lambda: self._apply_proxy_test(token, version, error))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_proxy_test(self, token, version, error):
+        if token != getattr(self, "_proxy_test_token", 0) or not self.winfo_exists():
+            return
+        self.proxy_test_btn.configure_state("normal")
+        if error:
+            self.proxy_status.set_fg_role("ERROR")
+            self.proxy_status.configure(text=i18n.tr("proxy_failed", message=error))
+            applog.log_event("proxy_test_failed", error=error)
+            return
+        self.proxy_status.set_fg_role("OK")
+        self.proxy_status.configure(text=i18n.tr("proxy_ok", version=version))
+        applog.log_event("proxy_test_ok", version=version)
 
     def _open_log(self):
         """在文件管理器里定位日志文件；还没有日志就先写一行把它建出来。"""
@@ -3388,6 +3469,8 @@ class App(tk.Tk):
         images.set_cookie_file(self.settings.get("cookie_file", ""))
         browser_cookies.set_platform_overrides(
             self.settings.get("platform_cookies", {}))
+        # 代理要在任何网络动作之前就位（空设置时回退到环境变量）
+        netproxy.set_from_settings(self.settings)
 
         self.title(i18n.tr("app_title"))
         self.minsize(*self.MIN_SIZE)

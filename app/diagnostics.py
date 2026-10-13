@@ -69,6 +69,16 @@ def _log_line() -> str:
         return i18n.tr("diag_unknown")
 
 
+def _proxy_line() -> str:
+    """代理设置（**密码打码**）；只报是否启用与地址。"""
+    try:
+        from . import netproxy
+
+        return netproxy.describe()
+    except Exception:
+        return i18n.tr("diag_unknown")
+
+
 def _ytdlp_line() -> str:
     """yt-dlp 版本 + 它到底来自哪里（App 内置还是本机更新）。
 
@@ -153,6 +163,7 @@ def build_report(settings: dict = None, probe=None) -> str:
         i18n.tr("diag_ffmpeg", value=_ffmpeg_line()),
         i18n.tr("diag_save_dir", value=_save_dir_line(settings)),
         i18n.tr("diag_log_path", value=_log_line()),
+        i18n.tr("diag_proxy", value=_proxy_line()),
     ]
     lines.extend(_cookie_lines(probe))
 

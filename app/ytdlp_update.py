@@ -342,7 +342,12 @@ def _session(session=None):
         return session
     import requests
 
-    return requests.Session()
+    from . import netproxy
+
+    http = requests.Session()
+    # 检查/下载 yt-dlp 也要走代理，否则受限网络下更新功能本身就是坏的
+    netproxy.apply_to_session(http)
+    return http
 
 
 def check_latest(session=None):

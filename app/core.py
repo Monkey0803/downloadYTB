@@ -17,6 +17,7 @@ import yt_dlp
 
 from . import i18n
 from . import browser_cookies
+from . import netproxy
 from . import platforms
 from .ffmpeg_util import ffmpeg_location_for_ytdlp
 
@@ -213,6 +214,8 @@ def _base_opts(with_cookies: bool = True, platform: Optional[str] = None) -> dic
         opts["ffmpeg_location"] = ffmpeg
     if with_cookies:
         opts.update(browser_cookies.ytdlp_options(platform))
+    # yt-dlp 不读 HTTP(S)_PROXY 环境变量，代理必须显式传参（netproxy 已处理优先级）
+    opts.update(netproxy.ytdlp_options())
     return opts
 
 

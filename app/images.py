@@ -21,6 +21,7 @@ import yt_dlp
 
 from . import i18n
 from . import browser_cookies
+from . import netproxy
 from . import platforms
 from gallery_dl import config as gdl_config
 from gallery_dl import job as gdl_job
@@ -231,6 +232,7 @@ def _weibo_session(ydl: Optional[yt_dlp.YoutubeDL]) -> requests.Session:
     微博访客 Cookie 会在 _weibo_status_data 里按需补齐。
     """
     session = requests.Session()
+    netproxy.apply_to_session(session)
     session.headers.update({"User-Agent": UA, "Referer": _WEIBO_REFERER})
     if ydl is None:
         return session
@@ -635,6 +637,8 @@ def probe_images(url: str) -> ImagePost:
     if gdl_cookies is not None:
         # gallery-dl 在 Cookie 读取失败时只记录警告并继续，不会中断解析。
         gdl_config.set(("extractor",), "cookies", gdl_cookies)
+    # gallery-dl 同样不读环境变量，代理要写进配置（下载与解析两侧）
+    netproxy.apply_to_gallery_dl(gdl_config)
 
     try:
         j = gdl_job.DataJob(url, file=None)
@@ -701,7 +705,8 @@ def fetch_image_bytes(url: str, max_bytes: int = 8 * 1024 * 1024,
     last_exc = None
     for _ in range(retries + 1):
         try:
-            r = requests.get(url, headers=_media_headers(url), timeout=10)
+            r = requests.get(url, headers=_media_headers(url), timeout=10,
+                             proxies=netproxy.session_proxies())
             r.raise_for_status()
             if len(r.content) > max_bytes:
                 raise ImageError(i18n.tr("error_thumbnail_large"))
@@ -774,6 +779,7 @@ def download_images(
     total = len(items)
     result = DownloadResult()
     session = requests.Session()
+    netproxy.apply_to_session(session)
 
     for i, item in enumerate(items):
         if cancel_event is not None and cancel_event.is_set():
