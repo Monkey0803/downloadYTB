@@ -91,6 +91,15 @@ Three constraints, all learned the hard way:
 - Installation is atomic (extract into a staging dir inside the same parent, verify the
   package and inner version, then `os.replace`) and zip-slip guarded; any failure leaves the
   app running on the bundled copy.
+- A **broken** managed copy must not stop the app from starting. `main.py` catches an
+  `ImportError` from the first import, marks that copy as `.broken-<version>` (kept aside with
+  the reason, never deleted) and re-execs itself with `VD_NO_MANAGED_YTDLP=1` so the retry uses
+  the bundled engine. This was not hypothetical: a managed copy whose `version.py` lacked
+  `CHANNEL` made the frozen app die at startup, before any UI existed.
+- The bundled version is written into the package by the build scripts
+  (`build/work/yt_dlp_bundled_version.txt`, read via `bundle_root()`): in a frozen app
+  `find_spec("yt_dlp")` reports paths that do not exist on disk and `loader.get_data` is a
+  plain file read, so `yt_dlp/version.py` is unreadable at runtime.
 
 ## Platform Identity
 

@@ -376,5 +376,57 @@ class NetworkTests(_TempRootCase):
         self.assertEqual(u.installed_versions(), [])
 
 
+class BrokenCopyTests(_TempRootCase):
+    """本机副本坏掉时的兜底：不能因此让 App 起不来。"""
+
+    def setUp(self):
+        super().setUp()
+        self._saved_path = list(sys.path)
+        os.environ.pop(u.DISABLE_ENV, None)
+
+    def tearDown(self):
+        sys.path[:] = self._saved_path
+        os.environ.pop(u.DISABLE_ENV, None)
+        super().tearDown()
+
+    def test_env_guard_skips_the_managed_copy(self):
+        """重启兜底：设了环境变量这次就完全不用本机副本。"""
+        root = self.install_fake("2099.01.01")
+        self.assertEqual(u.activate(), "managed")
+        sys.path[:] = self._saved_path
+        os.environ[u.DISABLE_ENV] = "1"
+        self.assertEqual(u.activate(), "bundled")
+        self.assertNotIn(root, sys.path)
+
+    def test_discard_moves_the_copy_aside_keeping_evidence(self):
+        self.install_fake("2099.01.01")
+        self.assertTrue(u.discard("2099.01.01", reason="ImportError: boom"))
+        self.assertEqual(u.installed_versions(), [], "坏副本不该再被认作可用")
+        broken = os.path.join(u.managed_root(), u.BROKEN_PREFIX + "2099.01.01")
+        self.assertTrue(os.path.isdir(broken))
+        with open(os.path.join(broken, "broken.txt"), encoding="utf-8") as fh:
+            self.assertIn("ImportError", fh.read())
+
+    def test_discard_is_safe_for_unknown_input(self):
+        for version in ("nightly", "", "2000.01.01"):
+            self.assertFalse(u.discard(version))
+
+    def test_discard_replaces_an_older_broken_marker(self):
+        self.install_fake("2099.01.01")
+        self.assertTrue(u.discard("2099.01.01", "first"))
+        self.install_fake("2099.01.01")
+        self.assertTrue(u.discard("2099.01.01", "second"))
+        with open(os.path.join(u.managed_root(), u.BROKEN_PREFIX + "2099.01.01",
+                               "broken.txt"), encoding="utf-8") as fh:
+            self.assertIn("second", fh.read())
+
+    def test_disable_current_only_reports_when_it_was_in_use(self):
+        self.assertFalse(u.disable_current("boom"), "没有本机副本时不该谎报处理过")
+        self.install_fake("2099.01.01")
+        self.assertTrue(u.disable_current("ImportError: cannot import CHANNEL"))
+        self.assertEqual(u.active_source(), "bundled")
+        self.assertEqual(u.activate(), "bundled")
+
+
 if __name__ == "__main__":
     unittest.main()

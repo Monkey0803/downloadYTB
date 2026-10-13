@@ -32,6 +32,9 @@ MANAGED_DIRNAME = "yt_dlp_pkg"
 PACKAGE_NAME = "yt_dlp"
 # 构建脚本写进包的版本文件（冻结包读不到 yt_dlp/version.py，见 bundle_root）
 BUNDLED_VERSION_FILENAME = "yt_dlp_bundled_version.txt"
+# 第二次启动用：告诉 activate() 这次绝对别用本机副本（坏副本兜底重启用）
+DISABLE_ENV = "VD_NO_MANAGED_YTDLP"
+BROKEN_PREFIX = ".broken-"
 
 _VERSION_RE = re.compile(r'__version__\s*=\s*["\']([^"\']+)["\']')
 
@@ -231,6 +234,9 @@ def activate() -> str:
 
     返回生效来源（``managed`` / ``bundled``），便于测试与诊断。
     """
+    if os.environ.get(DISABLE_ENV):
+        # 上一次启动因为本机副本坏了而重启，这次直接用内置副本
+        return "bundled"
     manager = best_managed()
     if manager is None:
         return "bundled"
@@ -240,6 +246,39 @@ def activate() -> str:
     if root not in sys.path:
         sys.path.insert(0, root)
     return "managed"
+
+
+def discard(version: str, reason: str = "") -> bool:
+    """把某个本机副本标记为坏（改名放一边），返回是否真的处理了。
+
+    必须留着而不是直接删：出问题时那份东西是唯一的线索，而且改名后
+    ``installed_versions()`` 会自然忽略它（只认版本号形式的目录名）。
+    """
+    if not parse_version(version):
+        return False
+    source = os.path.join(managed_root(), version)
+    if not os.path.isdir(source):
+        return False
+    target = os.path.join(managed_root(), BROKEN_PREFIX + version)
+    try:
+        if os.path.isdir(target):
+            shutil.rmtree(target, ignore_errors=True)
+        os.replace(source, target)
+        if reason:
+            with open(os.path.join(target, "broken.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(reason[:500] + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def disable_current(reason: str = "") -> bool:
+    """停用当前生效的本机副本；返回是否停用了（False 表示本来就没在用）。"""
+    if active_source() != "managed":
+        return False
+    version, _root = best_managed()
+    return discard(version, reason)
 
 
 # ---------- 安装 ----------
