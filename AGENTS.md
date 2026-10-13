@@ -213,6 +213,22 @@ the same second can reuse bytecode compiled from the old value (reproduced twice
 palette kept reporting `#3A4150` while the source said `#78829A`). Same-size, same-second
 edits are exactly what colour flipping produces, so suspect the cache before the code.
 
+## Thumbnail Loading
+
+Image posts fetch thumbnails through `ImagePanel._load_thumbnails()`, which uses a fixed number
+of **daemon** workers (`THUMB_WORKERS`) pulling from a queue instead of one thread per item: a
+20-image post used to open 20 simultaneous connections (the concurrency test measures exactly
+20 once the cap is removed), which invites rate limiting and socket exhaustion. Daemon threads
+were chosen over `ThreadPoolExecutor` because its threads are non-daemon and get joined at
+interpreter exit, so one slow request could delay closing the app. Workers exit as soon as the
+epoch changes, so switching posts drops the queued work, and the epoch also keeps stale results
+from landing in the grid.
+
+Tests for this must run a **real mainloop** (`test_thumbnails.py` runs it in slices until a
+predicate holds): the workers hop back with `self.after(...)` from a non-main thread, and Tk
+raises `RuntimeError: main thread is not in main loop` when the main thread only pumps
+`update()`. The first version of those tests failed for exactly that reason.
+
 ## Menubar Tests And AppKit Ordering
 
 `test_menubar.py` exercises the real `NSStatusBar`/`NSMenu` code (the only place pyobjc is

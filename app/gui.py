@@ -13,6 +13,7 @@
 
 import io
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -1593,6 +1594,7 @@ class ImagePanel(TFrame):
         self._cancel_event = None
         self._last_paths = []
         self._thumb_epoch = 0  # 解析代数，旧的缩略图线程结果直接丢弃
+        self._thumb_workers = []  # 仅供诊断：最近一批缩略图 worker（守护线程）
         self._resource_card_height = None
 
         self._build()
@@ -1881,21 +1883,43 @@ class ImagePanel(TFrame):
                 n=len(post.items)), ok=True)
         self._load_thumbnails(post)
 
-    def _load_thumbnails(self, post):
-        """后台并行拉取缩略图（每张独立线程 + 重试），主线程转 PhotoImage 填入网格。"""
-        epoch = self._thumb_epoch
+    # 缩略图并发上限：一个帖子可能有几十张图，原先「一张一个线程」会瞬间开几十个连接，
+    # 容易触发平台限流或耗尽 socket（微博动图帖实测 18 张）。
+    THUMB_WORKERS = 4
 
-        def fetch_one(i, item):
-            if epoch != self._thumb_epoch:
+    def _load_thumbnails(self, post):
+        """后台**限量**并发拉取缩略图，主线程转 PhotoImage 填入网格。
+
+        固定若干个守护线程从队列取任务，而不是一张图一个线程：线程数有上限、随
+        App 退出立即消失（ThreadPoolExecutor 的线程是非守护的，退出时会 join，
+        一次卡住的请求能拖慢关闭）。换帖子时代数（epoch）变化，worker 取到下一次
+        任务前就会退出，排队中的任务自然作废。
+        """
+        epoch = self._thumb_epoch
+        pending = queue.Queue()
+        for index, item in enumerate(post.items):
+            pending.put((index, item))
+        workers = min(self.THUMB_WORKERS, pending.qsize())
+        self._thumb_workers = []
+        for _ in range(max(0, workers)):
+            thread = threading.Thread(target=self._thumb_worker, args=(pending, epoch),
+                                      daemon=True, name=f"thumb-{epoch}")
+            thread.start()
+            self._thumb_workers.append(thread)
+
+    def _thumb_worker(self, pending, epoch):
+        while epoch == self._thumb_epoch:
+            try:
+                index, item = pending.get_nowait()
+            except queue.Empty:
                 return
             try:
                 raw = images.fetch_thumbnail(item)
             except Exception:
+                continue          # 单张失败不影响其它图，也不写状态栏
+            if epoch != self._thumb_epoch:
                 return
-            self.after(0, self._set_thumb, epoch, i, raw)
-
-        for i, item in enumerate(post.items):
-            threading.Thread(target=fetch_one, args=(i, item), daemon=True).start()
+            self.after(0, self._set_thumb, epoch, index, raw)
 
     def _set_thumb(self, epoch, index, raw):
         if epoch != self._thumb_epoch:
