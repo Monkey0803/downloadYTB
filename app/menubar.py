@@ -32,7 +32,7 @@ Fatal Error（SIGABRT，已在打包后的 .app 实测复现）。
 
 import sys
 
-from . import i18n
+from . import appupdate, i18n
 
 _AVAILABLE = False
 if sys.platform == "darwin":
@@ -84,6 +84,10 @@ if _AVAILABLE:
             NSApp.activateIgnoringOtherApps_(True)
             self.controller.pending = "settings"
 
+        def openRelease_(self, sender):
+            NSApp.activateIgnoringOtherApps_(True)
+            self.controller.pending = "open_release"
+
         # —— NSMenuDelegate：菜单即将弹出时刷新状态文案 ——
 
         def menuNeedsUpdate_(self, menu):
@@ -94,7 +98,8 @@ if _AVAILABLE:
 
         def __init__(self, app, icon_path, fallback_icon_path=None):
             self.app = app
-            self.pending = None  # "show" / "quit"，由 GUI 侧 after 轮询取走
+            self.pending = None  # 动作名，由 GUI 侧 after 轮询取走
+            self._update_version = ""  # 检查到的新版本号（空 = 未知/无）
             self._bar = NSStatusBar.systemStatusBar()
             self._item = self._bar.statusItemWithLength_(
                 NSVariableStatusItemLength)
@@ -165,8 +170,13 @@ if _AVAILABLE:
             menu.addItem_(NSMenuItem.separatorItem())
             add("show", b"showWindow:", "show_window")
             menu.addItem_(NSMenuItem.separatorItem())
+            # 版本项：平时是只读的「版本 x.y.z」，发现新版本后变成可点的提示
+            add("version", b"openRelease:", "menubar_version", enabled=False)
             add("quit", b"quitApp:", "quit")
 
+            # 立刻填上真实版本号：add() 只会填 i18n 模板，不刷新就会显示
+            # 「版本 {version}」（菜单第一次打开就能看见，用例抓到的）
+            self._refresh_version_item()
             self._item.setMenu_(menu)
 
         def take_pending(self):
@@ -179,6 +189,27 @@ if _AVAILABLE:
             self._status_mi.setTitle_(i18n.tr("idle"))
             for item, key in getattr(self, "_items", {}).values():
                 item.setTitle_(i18n.tr(key))
+            # 版本项要带版本号，不能直接用 i18n 键的原文
+            self._refresh_version_item()
+
+        def _refresh_version_item(self):
+            entry = getattr(self, "_items", {}).get("version")
+            if entry is None:
+                return
+            item = entry[0]
+            if self._update_version:
+                item.setTitle_(i18n.tr("menubar_update_available",
+                                       version=self._update_version))
+                item.setEnabled_(True)
+            else:
+                item.setTitle_(i18n.tr("menubar_version",
+                                       version=appupdate.current_version()))
+                item.setEnabled_(False)
+
+        def update_update_hint(self, version):
+            """界面检查到新版本时更新菜单项（空串 = 回到只读版本号）。"""
+            self._update_version = str(version or "")
+            self._refresh_version_item()
 
         def refresh_status(self):
             """菜单弹出时刷新只读状态项（只读取纯 Python 状态，不碰 Tk）。"""

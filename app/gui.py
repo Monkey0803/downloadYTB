@@ -23,8 +23,8 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import (applog, browser_cookies, core, diagnostics, i18n, images, menubar,
-               netproxy,
+from . import (applog, appupdate, browser_cookies, core, diagnostics, i18n, images,
+               menubar, netproxy,
                ytdlp_update,
                platforms, settings, taskbar, theme, windowing)
 from .widgets import (
@@ -2837,6 +2837,40 @@ class SettingsPage(TFrame):
                            bg_role="CARD", pady=(10, 0))
         self._track_card("diagnostics", card_diag, bd)
 
+        # —— 版本与更新 ——
+        card_ver = GlassCard(self._scroll_body)
+        card_ver.set_height(210)
+        card_ver.pack(fill="x", pady=(0, 12))
+        bv = card_ver.body
+        TLabel(bv, text=i18n.tr("version_card"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        ver_row = TFrame(bv, bg_role="CARD")
+        ver_row.pack(fill="x", pady=(10, 0))
+        self.version_label = TLabel(ver_row, text="", font=f.f_body,
+                                    bg_role="CARD", fg_role="TEXT")
+        self.version_label.pack(side="left")
+        self.update_check_btn = PillButton(ver_row, i18n.tr("check_updates"),
+                                           command=self._check_updates, font=f.f_btn,
+                                           width=96, bg_role="CARD")
+        self.update_check_btn.pack(side="left", padx=(12, 0))
+        self.release_btn = PillButton(ver_row, i18n.tr("update_open_page"),
+                                      command=self._open_release_page, font=f.f_btn,
+                                      width=110, bg_role="CARD")
+        self.release_btn.pack(side="left", padx=(8, 0))
+        self.version_status = TLabel(bv, text="", font=f.f_small, bg_role="CARD",
+                                     fg_role="TEXT_SUB")
+        self.version_status.pack(anchor="w", pady=(8, 0))
+        self.auto_update_var = tk.BooleanVar(
+            value=bool(app.settings.get("check_updates", True)))
+        self.update_auto_check = CheckPill(
+            bv, i18n.tr("update_auto"), self.auto_update_var,
+            command=self._on_auto_check_toggle, width=140, bg_role="CARD")
+        self.update_auto_check.pack(anchor="w", pady=(8, 0))
+        _pack_wrapped_hint(bv, app, i18n.tr("update_hint"), bg_role="CARD",
+                           pady=(8, 0))
+        self._track_card("version", card_ver, bv)
+        self._refresh_version_status()
+
         self._bind_scroll_events()
 
     def on_shown(self):
@@ -3010,6 +3044,107 @@ class SettingsPage(TFrame):
         self.proxy_status.set_fg_role("OK")
         self.proxy_status.configure(text=i18n.tr("proxy_ok", version=version))
         applog.log_event("proxy_test_ok", version=version)
+
+    # ---------- 版本与更新 ----------
+
+    def _refresh_version_status(self):
+        """显示当前版本与已知的新版本状态。"""
+        self.version_label.configure(
+            text=i18n.tr("version_current", version=appupdate.current_version()))
+        found = str(self.app.settings.get("update_available") or "")
+        if found:
+            self.version_status.set_fg_role("OK")
+            self.version_status.configure(
+                text=i18n.tr("update_available", version=found))
+            self.release_btn.configure_state("normal")
+            return
+        self.release_btn.configure_state("disabled")
+        self.version_status.set_fg_role("TEXT_SUB")
+        checked = appupdate.format_checked_at(
+            self.app.settings.get("last_update_check"))
+        self.version_status.configure(
+            text=i18n.tr("update_last_checked", time=checked) if checked
+            else i18n.tr("update_never_checked"))
+
+    def _on_auto_check_toggle(self):
+        enabled = bool(self.auto_update_var.get())
+        self.app.settings["check_updates"] = enabled
+        settings.save(self.app.settings)
+        applog.log_event("update_auto_toggle", enabled=enabled)
+
+    def _check_updates(self):
+        """后台查询 GitHub 公开 Releases 接口（手动触发）。"""
+        if not self.winfo_exists():
+            return
+        self._update_token = getattr(self, "_update_token", 0) + 1
+        token = self._update_token
+        self.update_check_btn.configure_state("disabled")
+        self.version_status.set_fg_role("TEXT_SUB")
+        self.version_status.configure(text=i18n.tr("checking_updates"))
+        self._start_update_worker(token, announce=True)
+
+    def _auto_check_updates(self):
+        """启动时最多每 24 小时自动检查一次（可在设置里关闭）。"""
+        if not appupdate.should_auto_check(self.app.settings):
+            return
+        self._start_update_worker(getattr(self, "_update_token", 0), announce=False)
+
+    def _start_update_worker(self, token, announce):
+        def work():
+            result = appupdate.check()
+            self.after(0, lambda: self._apply_update_check(token, result, announce))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_update_check(self, token, result, announce=True):
+        # 自动检查不改动设置页当前显示的文案，避免用户正在看时被改掉
+        if announce:
+            if token != getattr(self, "_update_token", 0):
+                return
+            if not self.winfo_exists():
+                return
+            self.update_check_btn.configure_state("normal")
+        status = result.get("status")
+        found = result.get("version") if status == "update" else ""
+        self.app.settings["update_available"] = found or ""
+        appupdate.mark_checked(self.app.settings)
+        settings.save(self.app.settings)
+        applog.log_event("update_check", status=status,
+                         version=result.get("version") or "",
+                         error=result.get("error") or "")
+        if status == "update":
+            self._announce_update(result.get("version"), result.get("url"))
+        if not announce or not self.winfo_exists():
+            return
+        if status == "error":
+            self.version_status.set_fg_role("ERROR")
+            self.version_status.configure(
+                text=i18n.tr("update_check_failed", message=result.get("error") or ""))
+            return
+        if status == "current":
+            self.version_status.set_fg_role("OK")
+            self.version_status.configure(text=i18n.tr("update_is_latest"))
+            return
+        self._refresh_version_status()
+
+    def _announce_update(self, version, url):
+        """发现新版本：菜单栏加一项、状态栏提一次（不弹模态框打断用户）。"""
+        self.app._release_url = url or appupdate.RELEASES_PAGE
+        try:
+            if self.app.menubar is not None:
+                self.app.menubar.update_update_hint(version)
+        except Exception:
+            pass
+        if getattr(self.app, "_update_notified", "") != version:
+            self.app._update_notified = version
+            # App 级入口（当前页面若不是面板则静默跳过，见 _set_status_anywhere）
+            self.app._set_status_anywhere(
+                i18n.tr("update_notice_status", version=version))
+
+    def _open_release_page(self):
+        url = getattr(self.app, "_release_url", "") or appupdate.RELEASES_PAGE
+        applog.log_event("open_release_page", url=url)
+        open_path(url)
 
     def _open_log(self):
         """在文件管理器里定位日志文件；还没有日志就先写一行把它建出来。"""
@@ -3519,6 +3654,8 @@ class App(tk.Tk):
         self.after(300, self._check_clipboard)
         # 首次安装才弹说明；延迟一点让主窗口先画出来
         self.after(self.ONBOARDING_DELAY_MS, self._maybe_show_welcome)
+        # 版本检查放在最后：不跟启动期的 Cookie 体检、剪贴板检查抢资源
+        self.after(self.UPDATE_CHECK_DELAY_MS, self._settings_page_auto_check)
         self.bind("<FocusIn>", self._on_focus_in)
 
     # ---------- 下载队列 ----------
@@ -3695,6 +3832,7 @@ class App(tk.Tk):
     # ---------- 首次使用说明 ----------
 
     ONBOARDING_DELAY_MS = 600
+    UPDATE_CHECK_DELAY_MS = 2500
 
     def needs_onboarding(self):
         """只有「全新安装」（还没有设置文件）且没看过说明时才需要引导。"""
@@ -3724,6 +3862,12 @@ class App(tk.Tk):
                 if isinstance(path, str) and path.strip():
                     return path.strip()
         return self.settings.get("save_dir") or core.DEFAULT_SAVE_DIR
+
+    def _settings_page_auto_check(self):
+        """启动后延迟触发一次版本自动检查（那块界面属于设置页）。"""
+        page = self.pages.get("settings")
+        if page is not None:
+            page._auto_check_updates()
 
     def _on_mouse_wheel(self, event):
         if self.current_page != "settings":
@@ -4134,6 +4278,8 @@ class App(tk.Tk):
         elif req == "settings":
             self.show_main_window()
             self.show_page("settings")
+        elif req == "open_release":
+            open_path(getattr(self, "_release_url", "") or appupdate.RELEASES_PAGE)
 
     def _on_close_window(self):
         """关闭窗口（红色按钮）→ 隐藏窗口，应用保留在 menubar 运行。"""

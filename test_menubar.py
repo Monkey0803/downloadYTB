@@ -14,7 +14,7 @@ NSStatusItem。反过来先让 pyobjc 建 AppKit、后初始化 Tk，Tk 启动�
 
 import unittest
 
-from app import gui, i18n, menubar, settings as settings_mod
+from app import appupdate, gui, i18n, menubar, settings as settings_mod
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -78,7 +78,8 @@ class MenuBarControllerTests(unittest.TestCase):
     def test_actions_set_the_expected_pending_value(self):
         cases = (("clipboardLink_", "clipboard"), ("openLastFolder_", "last_folder"),
                  ("showHistory_", "history"), ("showSettings_", "settings"),
-                 ("showWindow_", "show"), ("quitApp_", "quit"))
+                 ("showWindow_", "show"), ("quitApp_", "quit"),
+                 ("openRelease_", "open_release"))
         for method, expected in cases:
             self.controller.pending = None
             getattr(self.delegate, method)(None)
@@ -136,6 +137,33 @@ class MenuBarControllerTests(unittest.TestCase):
         item, key = self.controller._items["settings"]
         self.assertTrue(key)
         self.assertEqual(str(item.title()), i18n.tr(key))
+
+    def test_version_item_shows_the_version_and_is_read_only(self):
+        """平时只是个只读版本号，用户不用打开设置就知道自己用的是哪版。"""
+        item = self.controller._items["version"][0]
+        self.assertIn(appupdate.current_version(), str(item.title()))
+        self.assertFalse(bool(item.isEnabled()))
+
+    def test_update_hint_turns_the_version_item_clickable(self):
+        self.controller.update_update_hint("9.9.9")
+        item = self.controller._items["version"][0]
+        self.assertIn("9.9.9", str(item.title()))
+        self.assertTrue(bool(item.isEnabled()), "发现新版本后应当可点")
+        self.controller.update_update_hint("")
+        self.assertIn(appupdate.current_version(), str(item.title()))
+        self.assertFalse(bool(item.isEnabled()), "清空后回到只读")
+
+    def test_version_item_follows_the_language(self):
+        i18n.set_language("zh_CN")
+        self.controller.update_language()
+        chinese = str(self.controller._items["version"][0].title())
+        i18n.set_language("en")
+        self.controller.update_language()
+        english = str(self.controller._items["version"][0].title())
+        self.assertNotEqual(chinese, english)
+        self.assertIn(appupdate.current_version(), english)
+        i18n.set_language("zh_CN")
+        self.controller.update_language()
 
     def test_remove_is_safe_to_call_twice(self):
         self.controller.remove()
