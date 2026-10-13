@@ -395,6 +395,30 @@ Preview the notes for any range before tagging:
 python3 build/release_notes.py v1.8.0 --repo Monkey0803/downloadYTB
 ~~~
 
+## Packaged Verification
+
+`App.run()` honours `VD_TEST_SCRIPT`: when that environment variable points at an existing file,
+the file is `exec`'d with `{"app": app}` after the window is built and before `mainloop()`. That is
+how behaviour gets verified in the frozen app:
+
+```bash
+launchctl setenv VD_TEST_SCRIPT /tmp/verify.py   # macOS: `open` does not inherit the shell env
+open -n dist/VideoDownloader.app
+```
+
+Three things learned by getting them wrong, all inside this repository:
+
+- The frozen bundle has **no `unittest`**: `from unittest.mock import patch` raises
+  `ModuleNotFoundError`, and inside a Tk callback that error simply disappears. Stub by hand —
+  keep the original attribute, assign a recorder, restore it in `finally`.
+- Write a marker line at **module level** and wrap every `after()`-scheduled function in a
+  try/except that records the traceback into the output file. Twice a smoke run produced an empty
+  file because the real error happened inside a callback, and Tk swallowed it.
+- Use `launchctl setenv` (a plain `open` does not pass environment variables) and `open -n`, so a
+  stale already-running instance without the script cannot be reactivated instead.
+- Smoke scripts must neutralise `settings.save` (or restore the file) — a verification run that
+  saves state will add the new default keys to the user's real `settings.json`.
+
 ## Security and Configuration
 
 Browser-cookie selections and paths are stored locally. Treat them as sensitive: do not commit settings files, credentials, cookies, or personal media. Respect target-platform terms, copyright, privacy requirements, and rate limits.
