@@ -320,6 +320,11 @@ Instagram often rejects anonymous access, including for public posts. Select a b
 - Bilibili playback URL APIs may return HTTP 412 for data-center or overseas IP addresses.
 - These restrictions come from the platforms and the network environment. The app can provide clearer errors, but it cannot guarantee bypassing platform restrictions.
 
+## What's next
+
+Planned features and improvements live in [ROADMAP.md](ROADMAP.md) (with ICE scores
+and code evidence); the completed UX audit is in [UX-AUDIT.md](UX-AUDIT.md).
+
 ## Privacy and security
 
 - Application settings are stored locally in the user's profile.
