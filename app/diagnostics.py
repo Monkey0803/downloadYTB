@@ -50,6 +50,22 @@ def _dependency_version(module_name: str) -> str:
     return str(getattr(module, "__version__", i18n.tr("diag_unknown")))
 
 
+def _ytdlp_line() -> str:
+    """yt-dlp 版本 + 它到底来自哪里（App 内置还是本机更新）。
+
+    排查「同一版本号行为不同」时，来源比版本号本身更关键。
+    """
+    try:
+        from . import ytdlp_update
+
+        source = ytdlp_update.active_source()
+    except Exception:
+        source = "bundled"
+    label = i18n.tr("ytdlp_source_managed" if source == "managed"
+                    else "ytdlp_source_bundled")
+    return f"{_dependency_version('yt_dlp')} ({label})"
+
+
 def _ffmpeg_line() -> str:
     try:
         from .ffmpeg_util import ffmpeg_location_for_ytdlp
@@ -113,7 +129,7 @@ def build_report(settings: dict = None, probe=None) -> str:
         i18n.tr("diag_app_version", value=__version__),
         i18n.tr("diag_os", value=platform.platform()),
         i18n.tr("diag_python", value=sys.version.split()[0]),
-        i18n.tr("diag_ytdlp", value=_dependency_version("yt_dlp")),
+        i18n.tr("diag_ytdlp", value=_ytdlp_line()),
         i18n.tr("diag_gallerydl", value=_dependency_version("gallery_dl")),
         i18n.tr("diag_ffmpeg", value=_ffmpeg_line()),
         i18n.tr("diag_save_dir", value=_save_dir_line(settings)),

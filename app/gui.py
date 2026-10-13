@@ -23,6 +23,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 from . import (browser_cookies, core, diagnostics, i18n, images, menubar,
+               ytdlp_update,
                platforms, settings, taskbar, theme, windowing)
 from .widgets import (
     CheckPill, GlassCard, ImagePicker, LogoSwatch, PillButton, PillSelect,
@@ -2666,6 +2667,29 @@ class SettingsPage(TFrame):
                            bg_role="CARD", pady=(8, 0))
         self._track_card("shortcuts", card_keys, bk)
 
+        # —— yt-dlp 更新：打包的 yt-dlp 会随站点改版失效，这里装最新版到本机 ——
+        card_ytdlp = GlassCard(self._scroll_body)
+        card_ytdlp.set_height(200)
+        card_ytdlp.pack(fill="x", pady=(0, 12))
+        by = card_ytdlp.body
+        TLabel(by, text=i18n.tr("ytdlp_card"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        self._ytdlp_token = 0
+        self._ytdlp_pending = None       # (版本, wheel 直链)，点按钮时决定「检查」还是「更新」
+        self.ytdlp_version_label = TLabel(by, text="", font=f.f_body, bg_role="CARD")
+        self.ytdlp_version_label.pack(anchor="w", pady=(8, 0))
+        self.ytdlp_status_label = TLabel(by, text="", font=f.f_small, bg_role="CARD",
+                                        fg_role="TEXT_SUB")
+        self.ytdlp_status_label.pack(anchor="w", pady=(4, 0))
+        ytdlp_row = TFrame(by, bg_role="CARD")
+        ytdlp_row.pack(fill="x", pady=(8, 0))
+        self.ytdlp_btn = PillButton(ytdlp_row, i18n.tr("ytdlp_check"),
+                                    command=self._on_ytdlp_button, font=f.f_btn, width=140)
+        self.ytdlp_btn.pack(side="left")
+        _pack_wrapped_hint(by, app, i18n.tr("ytdlp_hint"), bg_role="CARD", pady=(10, 0))
+        self._track_card("ytdlp", card_ytdlp, by)
+        self._ytdlp_refresh()
+
         # —— 诊断与反馈 ——
         card_diag = GlassCard(self._scroll_body)
         card_diag.set_height(150)
@@ -2980,6 +3004,88 @@ class SettingsPage(TFrame):
         if value != "suggest":
             # 关掉/改成自动后，残留的建议条要收起来
             self.app._hide_clipboard_suggestion()
+
+    # ---------- yt-dlp 更新 ----------
+
+    def _ytdlp_refresh(self):
+        version, source = ytdlp_update.active_version()
+        label = i18n.tr("ytdlp_source_managed" if source == "managed"
+                        else "ytdlp_source_bundled")
+        self.ytdlp_version_label.configure(text=i18n.tr(
+            "ytdlp_current", version=version or i18n.tr("diag_unknown"), source=label))
+
+    def _on_ytdlp_button(self):
+        if self._ytdlp_pending:
+            self._start_ytdlp_update(*self._ytdlp_pending)
+        else:
+            self._start_ytdlp_check()
+
+    def _start_ytdlp_check(self):
+        if not self.winfo_exists():
+            return
+        self._ytdlp_token += 1
+        token = self._ytdlp_token
+        self._ytdlp_pending = None
+        self.ytdlp_btn.configure_state("disabled")
+        self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_checking"))
+
+        def work():
+            try:
+                version, url = ytdlp_update.check_latest()
+                error = None
+            except Exception as exc:      # 网络问题不该让界面崩掉
+                version = url = None
+                error = str(exc)
+            self.after(0, lambda: self._apply_ytdlp_check(token, version, url, error))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_ytdlp_check(self, token, version, url, error):
+        if token != self._ytdlp_token or not self.winfo_exists():
+            return
+        self.ytdlp_btn.configure_state("normal")
+        if error:
+            self.ytdlp_status_label.configure(text=error)
+            return
+        current, _source = ytdlp_update.active_version()
+        if not ytdlp_update.is_newer(version, current):
+            self.ytdlp_btn.set_text(i18n.tr("ytdlp_check"))
+            self.ytdlp_status_label.configure(
+                text=i18n.tr("ytdlp_is_latest", version=version))
+            return
+        self._ytdlp_pending = (version, url)
+        self.ytdlp_btn.set_text(i18n.tr("ytdlp_update_to", version=version))
+        self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_found", version=version))
+
+    def _start_ytdlp_update(self, version, url):
+        if not self.winfo_exists():
+            return
+        self._ytdlp_token += 1
+        token = self._ytdlp_token
+        self.ytdlp_btn.configure_state("disabled")
+        self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_updating"))
+
+        def work():
+            try:
+                ytdlp_update.download_and_install(version, url)
+                error = None
+            except Exception as exc:
+                error = str(exc)
+            self.after(0, lambda: self._apply_ytdlp_update(token, version, error))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_ytdlp_update(self, token, version, error):
+        if token != self._ytdlp_token or not self.winfo_exists():
+            return
+        self.ytdlp_btn.configure_state("normal")
+        self._ytdlp_pending = None
+        self.ytdlp_btn.set_text(i18n.tr("ytdlp_check"))
+        if error:
+            self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_failed", message=error))
+            return
+        self.ytdlp_status_label.configure(text=i18n.tr("ytdlp_updated", version=version))
+        self._ytdlp_refresh()
 
     def _on_group_by_post_change(self):
         self.app.settings["group_by_post"] = bool(self.group_post_var.get())

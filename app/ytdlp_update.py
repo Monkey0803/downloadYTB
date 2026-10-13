@@ -179,14 +179,20 @@ def best_managed():
     return version, os.path.join(managed_root(), version)
 
 
+def active_version() -> tuple:
+    """当前实际生效的 ``(版本, 来源)``；版本读不到时是空串。
+
+    「生效」= activate() 会做的同一个判断，界面与诊断都以此为准，避免两处算法不一致。
+    """
+    manager = best_managed()
+    if manager is not None and should_use_managed(manager[0], bundled_version()):
+        return manager[0], "managed"
+    return bundled_version(), "bundled"
+
+
 def active_source() -> str:
     """当前实际生效的来源：``managed`` 或 ``bundled``（供界面与诊断显示）。"""
-    manager = best_managed()
-    if manager is None:
-        return "bundled"
-    if not should_use_managed(manager[0], bundled_version()):
-        return "bundled"
-    return "managed"
+    return active_version()[1]
 
 
 def activate() -> str:

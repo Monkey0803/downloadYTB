@@ -73,6 +73,10 @@ The packaged yt-dlp is frozen at build time, so a site change breaks every downl
 new app release ships. `app/ytdlp_update.py` installs the official wheel from PyPI into the
 user data directory and injects it into `sys.path` at startup.
 
+The settings page exposes it as the *yt-dlp update* card in the Advanced section: one button
+that checks PyPI and then turns into "update to X", with a token guarding against a stale
+result overwriting newer state.
+
 Three constraints, all learned the hard way:
 
 - `activate()` must run **before anything imports `yt_dlp`** (that is why `main.py` calls it
