@@ -145,6 +145,12 @@ flow: switch page, fill the URL, call `on_download()` (which probes first) and l
 current settings apply. That keeps the queue out of the core download state machine; the
 trade-off is stated in the page hint so users are not surprised.
 
+Batch pasting is split deliberately: `gui.parse_links()` **only extracts** links (order
+preserved, duplicates kept), while `App.enqueue_urls()` owns deduplication and counting. Doing
+the dedup in the parser made the UI always report "skipped 0 duplicates", because the repeats
+were already gone by the time the count was taken. The URL pattern accepts only URL-safe ASCII,
+so a link glued to Chinese prose ("看这个https://…很好") comes out clean.
+
 `advance_queue()` refuses to take a job while **any** panel reports `_busy`, so two downloads
 never fight over one progress bar. Panels call `App.notify_download_finished()` from
 `_reset_after_download()`, which schedules the next advance with `after(...)` — advancing

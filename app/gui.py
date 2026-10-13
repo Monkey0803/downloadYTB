@@ -115,6 +115,26 @@ def _sanitize_filename(text: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+# 只认 URL 安全字符：这样贴在中英文混排文本里的链接能挑出来，而周围的中文不会被
+# 当成链接的一部分（实测聊天记录里最常见的就是「看这个https://…很好」）
+_URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
+
+
+def parse_links(text) -> list:
+    """从任意文本里挑出链接，保持出现顺序（**不去重**）。
+
+    用于「批量粘贴」：用户从聊天记录或文档里复制一大段，里面可能混着说明文字、
+    重复链接和中文标点。去重与计数交给 ``enqueue_urls``——放在这里的话，「跳过 N 个
+    重复」就永远报 0，因为重复项在解析阶段就被吃掉了（实测踩到）。
+    """
+    found = []
+    for raw in _URL_RE.findall(str(text or "")):
+        url = raw.rstrip(".,;:!?)]}'\"、，。；：！？）】》」’“")
+        if url:
+            found.append(url)
+    return found
+
+
 def post_folder_name(post_id: str, title: str = "") -> str:
     """「每个帖子单独建子文件夹」用的目录名：``<帖子 ID>_<标题摘要>``。
 
@@ -1516,13 +1536,26 @@ class VideoPanel(TFrame):
         open_in_file_manager(self._last_file)
 
     def on_enqueue(self):
-        """把当前链接加入队列（选项不冻结，执行时用当时的设置）。"""
-        url = self.url_entry.get().strip()
-        if not url:
+        """把当前链接加入队列（选项不冻结，执行时用当时的设置）。
+
+        输入框里出现多个链接时（例如整段粘贴）全部排队，并如实报告数量。
+        """
+        text = self.url_entry.get().strip()
+        urls = parse_links(text)
+        if not urls:
             self._set_status(i18n.tr("queue_need_link"), error=True)
             return
-        self.app.enqueue_url(url)
-        self._set_status(i18n.tr("queue_added", url=url), ok=True)
+        if len(urls) == 1:
+            self.app.enqueue_url(urls[0])
+            self._set_status(i18n.tr("queue_added", url=urls[0]), ok=True)
+            return
+        added, skipped = self.app.enqueue_urls(urls)
+        if not added:
+            self._set_status(i18n.tr("queue_all_duplicated", skipped=skipped),
+                             error=True)
+            return
+        self._set_status(i18n.tr("queue_batch_added", n=added, skipped=skipped),
+                         ok=True)
 
     def on_open_file(self):
         path = self._last_file
@@ -2166,6 +2199,13 @@ class QueuePage(TFrame):
 
         toggle_row = TFrame(self._body, bg_role="BG")
         toggle_row.pack(fill="x", pady=(0, 10))
+        self.batch_btn = PillButton(toggle_row, i18n.tr("queue_paste_many"),
+                                    command=self._on_paste_many, font=app.f_btn,
+                                    width=110, bg_role="BG")
+        self.batch_btn.pack(side="right")
+        self.status_label = TLabel(toggle_row, text="", font=app.f_small, bg_role="BG",
+                                   fg_role="TEXT_SUB")
+        self.status_label.pack(side="right", padx=(0, 10))
         self.autostart_var = tk.BooleanVar(value=app.queue_autostart_enabled())
         check = i18n.tr("queue_autostart")
         CheckPill(toggle_row, check, self.autostart_var,
@@ -2184,6 +2224,7 @@ class QueuePage(TFrame):
             child.destroy()
         items = self.app.queue_items()[:self.MAX_ROWS]
         has_items = bool(items)
+        self.status_label.configure(text="")
         self.start_btn.configure_state("normal" if has_items else "disabled")
         self.clear_btn.configure_state("normal" if has_items else "disabled")
         self.autostart_var.set(self.app.queue_autostart_enabled())
@@ -2222,6 +2263,30 @@ class QueuePage(TFrame):
         if 0 <= index < len(items):
             items.pop(index)
             self.app.set_queue_items(items)
+
+    def _on_paste_many(self):
+        """把剪贴板里的多个链接一次性排队（忽略其中的说明文字与重复链接）。"""
+        try:
+            text = self.app.clipboard_get()
+        except tk.TclError:
+            text = ""
+        urls = parse_links(text)
+        if not urls:
+            self._set_queue_status(i18n.tr("queue_no_links"), ok=False)
+            return
+        added, skipped = self.app.enqueue_urls(urls)
+        if not added:
+            self._set_queue_status(
+                i18n.tr("queue_all_duplicated", skipped=skipped), ok=False)
+            return
+        self._set_queue_status(
+            i18n.tr("queue_batch_added", n=added, skipped=skipped), ok=True)
+
+    def _set_queue_status(self, text, ok=True):
+        if not self.winfo_exists():
+            return
+        self.status_label.set_fg_role("TEXT_SUB" if ok else "ERROR")
+        self.status_label.configure(text=text)
 
     def _on_start_next(self):
         self.app.advance_queue(force=True)
@@ -3374,6 +3439,30 @@ class App(tk.Tk):
         items.append({"url": url, "platform": platform or detect_platform(url)})
         self.set_queue_items(items)
         return True
+
+    def enqueue_urls(self, urls):
+        """批量入队，返回 (新增数, 跳过数)。
+
+        跳过 = 队列里已有 或 本批重复。用户从聊天记录里复制时经常重复粘贴，
+        静默去重比塞一堆重复项友好；数量会如实反馈给界面。
+        """
+        existing = {item.get("url") for item in self.queue_items()}
+        items = list(self.queue_items())
+        room = max(0, self.QUEUE_LIMIT - len(items))
+        added = 0
+        skipped = 0
+        for url in urls or []:
+            url = (url or "").strip()
+            # 队列满了也算「跳过」，否则返回的 added 会虚报（set_queue_items 会截断）
+            if not url or url in existing or added >= room:
+                skipped += 1
+                continue
+            items.append({"url": url, "platform": detect_platform(url)})
+            existing.add(url)
+            added += 1
+        if added:
+            self.set_queue_items(items)
+        return added, skipped
 
     def dequeue_item(self, index=0):
         items = self.queue_items()

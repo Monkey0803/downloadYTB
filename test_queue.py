@@ -9,6 +9,7 @@
 """
 
 import time
+import tkinter as tk
 import unittest
 from unittest.mock import Mock
 
@@ -364,6 +365,173 @@ class QueuePageTests(unittest.TestCase):
     def test_page_is_in_the_sidebar(self):
         self.assertIn("queue", self.app.nav_items)
         self.assertIn("queue", self.app.pages)
+
+
+class ParseLinksTests(unittest.TestCase):
+    """从一段文本里挑链接（批量粘贴的解析层）。"""
+
+    def test_extracts_from_mixed_text(self):
+        cases = {
+            "看这个https://weibo.com/2549621477/Rmr4XxLMD很好":
+                ["https://weibo.com/2549621477/Rmr4XxLMD"],
+            "https://a.com/1\nhttps://b.com/2?x=1#f\n\n   https://c.com/3   ":
+                ["https://a.com/1", "https://b.com/2?x=1#f", "https://c.com/3"],
+            "（https://x.com/someone/status/123），https://www.instagram.com/p/ABC/。":
+                ["https://x.com/someone/status/123", "https://www.instagram.com/p/ABC/"],
+        }
+        for text, expected in cases.items():
+            self.assertEqual(gui.parse_links(text), expected, text)
+
+    def test_keeps_every_occurrence_in_order(self):
+        """解析不去重：否则入队时「跳过 N 个重复」会永远报 0。"""
+        text = "https://a.com/1 https://b.com/2 https://a.com/1"
+        self.assertEqual(gui.parse_links(text),
+                         ["https://a.com/1", "https://b.com/2", "https://a.com/1"])
+
+    def test_ignores_text_without_links(self):
+        for text in ("没有链接的一段话", "", "   ", None, 12345,
+                     "ftp://old.example.com/file", "www.example.com/no-scheme"):
+            self.assertEqual(gui.parse_links(text), [], repr(text))
+
+    def test_trims_chinese_and_ascii_trailing_punctuation(self):
+        self.assertEqual(gui.parse_links("https://a.com/1，"),
+                         ["https://a.com/1"])
+        self.assertEqual(gui.parse_links("https://a.com/1)."),
+                         ["https://a.com/1"])
+
+
+class EnqueueManyTests(unittest.TestCase):
+    """批量入队的去重与容量。"""
+
+    def setUp(self):
+        settings_mod.save = lambda data: None
+        self.app = _shared_app()
+        self.app.settings["download_queue"] = []
+
+    def tearDown(self):
+        settings_mod.save = _ORIGINAL_SAVE
+        self.app.settings["download_queue"] = []
+
+    def test_adds_all_and_reports_counts(self):
+        added, skipped = self.app.enqueue_urls(
+            ["https://www.youtube.com/watch?v=a", WEIBO])
+        self.assertEqual((added, skipped), (2, 0))
+        self.assertEqual([item["url"] for item in self.app.queue_items()],
+                         ["https://www.youtube.com/watch?v=a", WEIBO])
+        self.assertEqual([item["platform"] for item in self.app.queue_items()],
+                         ["youtube", "weibo"])
+
+    def test_skips_links_already_queued(self):
+        self.app.enqueue_url(WEIBO)
+        added, skipped = self.app.enqueue_urls([WEIBO, YOUTUBE])
+        self.assertEqual((added, skipped), (1, 1))
+        self.assertEqual(len(self.app.queue_items()), 2)
+
+    def test_skips_duplicates_inside_the_batch(self):
+        added, skipped = self.app.enqueue_urls([WEIBO, WEIBO, WEIBO])
+        self.assertEqual((added, skipped), (1, 2))
+        self.assertEqual(len(self.app.queue_items()), 1)
+
+    def test_respects_the_queue_limit_without_overreporting(self):
+        limit = self.app.QUEUE_LIMIT
+        self.app.enqueue_urls([f"https://a.com/{i}" for i in range(limit - 1)])
+        added, skipped = self.app.enqueue_urls(
+            ["https://a.com/x", "https://a.com/y", "https://a.com/z", ""])
+        self.assertEqual(added, 1, "只剩一个位置，不能虚报")
+        self.assertEqual(skipped, 3)
+        self.assertEqual(len(self.app.queue_items()), limit)
+
+    def test_empty_input_is_a_noop(self):
+        self.assertEqual(self.app.enqueue_urls([]), (0, 0))
+        self.assertEqual(self.app.enqueue_urls(None), (0, 0))
+        # 空字符串算「跳过」：界面上它确实是没排上的一项
+        self.assertEqual(self.app.enqueue_urls(["", "   "]), (0, 2))
+
+
+class BatchPasteUiTests(unittest.TestCase):
+    """队列页「批量粘贴」按钮与视频面板的多链接入队。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = _shared_app()
+
+    def setUp(self):
+        settings_mod.save = lambda data: None
+        self.app.settings["download_queue"] = []
+        self.app.show_page("queue")
+        self.app.update_idletasks()
+        self.page = self.app.pages["queue"]
+        self.page.refresh()
+        self.panel = self.app.pages["youtube"].video_panel
+        self.statuses = []
+        self._set_status = self.panel._set_status
+        self.panel._set_status = lambda text, error=False, **kw: self.statuses.append(
+            (text, error))
+
+    def tearDown(self):
+        self.panel._set_status = self._set_status
+        settings_mod.save = _ORIGINAL_SAVE
+        self.app.settings["download_queue"] = []
+
+    def _paste(self, text):
+        self.page.app.clipboard_get = lambda: text
+        self.page._on_paste_many()
+
+    def test_button_exists(self):
+        self.assertEqual(self.page.batch_btn._text, i18n.tr("queue_paste_many"))
+
+    def test_pastes_every_link_from_the_clipboard(self):
+        self._paste(f"好片 https://www.youtube.com/watch?v=a 和\n{WEIBO}，还有 "
+                    "https://www.youtube.com/watch?v=a")
+        self.assertEqual([item["url"] for item in self.app.queue_items()],
+                         ["https://www.youtube.com/watch?v=a", WEIBO])
+        self.assertIn(i18n.tr("queue_batch_added", n=2, skipped=1),
+                      self.page.status_label.cget("text"))
+
+    def test_reports_when_the_clipboard_has_no_link(self):
+        self._paste("只是普通文字")
+        self.assertEqual(self.app.queue_items(), [])
+        self.assertEqual(self.page.status_label.cget("text"),
+                         i18n.tr("queue_no_links"))
+
+    def test_reports_when_everything_is_a_duplicate(self):
+        self.app.enqueue_url(WEIBO)
+        self._paste(WEIBO)
+        self.assertEqual(len(self.app.queue_items()), 1)
+        self.assertIn("1", self.page.status_label.cget("text"))
+
+    def test_empty_clipboard_does_not_raise(self):
+        def boom():
+            raise tk.TclError("clipboard is empty")
+
+        self.page.app.clipboard_get = boom
+        self.page._on_paste_many()
+        self.assertEqual(self.page.status_label.cget("text"),
+                         i18n.tr("queue_no_links"))
+
+    def test_refresh_clears_the_one_off_status(self):
+        self._paste("只 是 文 字")
+        self.page.refresh()
+        self.assertEqual(self.page.status_label.cget("text"), "")
+
+    def test_video_panel_queues_several_pasted_links(self):
+        self.panel.url_entry.set(f"{YOUTUBE}\n{WEIBO}")
+        self.panel.on_enqueue()
+        self.assertEqual(len(self.app.queue_items()), 2)
+        self.assertIn(i18n.tr("queue_batch_added", n=2, skipped=0),
+                      self.statuses[-1][0])
+        self.assertFalse(self.statuses[-1][1])
+
+    def test_video_panel_single_link_keeps_the_old_message(self):
+        self.panel.url_entry.set(YOUTUBE)
+        self.panel.on_enqueue()
+        self.assertEqual(self.statuses[-1][0], i18n.tr("queue_added", url=YOUTUBE))
+
+    def test_video_panel_without_links_still_hints(self):
+        self.panel.url_entry.set("没有链接")
+        self.panel.on_enqueue()
+        self.assertEqual(self.app.queue_items(), [])
+        self.assertEqual(self.statuses[-1][0], i18n.tr("queue_need_link"))
 
 
 if __name__ == "__main__":
