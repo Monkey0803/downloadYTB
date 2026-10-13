@@ -133,6 +133,31 @@ class VersionTests(unittest.TestCase):
                 fh.write("# no version here\n")
             self.assertEqual(u.read_version_file(tmp), "")
 
+    def test_plain_version_file_is_used_when_version_py_is_unreadable(self):
+        """冻结包场景：只能靠构建时写入的版本文件。"""
+        from unittest.mock import patch as _patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, u.BUNDLED_VERSION_FILENAME), "w",
+                      encoding="utf-8") as fh:
+                fh.write("2030.01.02\n")
+            with _patch.object(u, "bundled_dir", lambda: ""), \
+                 _patch.object(u, "bundle_root", lambda: tmp):
+                self.assertEqual(u.bundled_version(), "2030.01.02")
+
+    def test_garbage_version_file_is_ignored(self):
+        from unittest.mock import patch as _patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, u.BUNDLED_VERSION_FILENAME), "w",
+                      encoding="utf-8") as fh:
+                fh.write("nightly\n")
+            with _patch.object(u, "bundled_dir", lambda: ""), \
+                 _patch.object(u, "bundle_root", lambda: tmp), \
+                 _patch("importlib.metadata.version",
+                        side_effect=Exception("no metadata")):
+                self.assertEqual(u.bundled_version(), "")
+
     def test_bundled_version_is_readable(self):
         """内置 yt-dlp 的版本号要能读到（读不到就永远优先用户副本，这是可接受的，
         但仍应确认取值路径可用）。"""

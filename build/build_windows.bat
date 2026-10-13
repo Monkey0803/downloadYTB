@@ -10,6 +10,10 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
+REM 冻结包运行期读不到 yt_dlp 的 version.py（代码在归档里），把版本号写成文件一起打包
+if not exist build\work mkdir build\work
+"%PYTHON%" -c "import yt_dlp.version; print(yt_dlp.version.__version__)" > build\work\yt_dlp_bundled_version.txt 2>nul
+
 "%PYTHON%" -m PyInstaller ^
     --noconfirm ^
     --windowed ^
@@ -17,6 +21,7 @@ if not exist "%PYTHON%" (
     --name "VideoDownloader" ^
     --icon "%CD%\assets\app.ico" ^
     --add-data "%CD%\assets;assets" ^
+    --add-data "%CD%\build\work\yt_dlp_bundled_version.txt;." ^
     --collect-all imageio_ffmpeg ^
     --collect-all gallery_dl ^
     --collect-all yt_dlp_ejs ^

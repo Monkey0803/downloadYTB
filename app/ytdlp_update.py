@@ -30,6 +30,8 @@ from . import i18n
 PYPI_JSON = "https://pypi.org/pypi/yt-dlp/json"
 MANAGED_DIRNAME = "yt_dlp_pkg"
 PACKAGE_NAME = "yt_dlp"
+# 构建脚本写进包的版本文件（冻结包读不到 yt_dlp/version.py，见 bundle_root）
+BUNDLED_VERSION_FILENAME = "yt_dlp_bundled_version.txt"
 
 _VERSION_RE = re.compile(r'__version__\s*=\s*["\']([^"\']+)["\']')
 
@@ -128,12 +130,41 @@ def bundled_dir() -> str:
     return ""
 
 
+def bundle_root() -> str:
+    """冻结包的资源根目录；开发环境返回仓库根目录。
+
+    PyInstaller 把 ``yt_dlp`` 编进归档，运行期**拿不到**它的 ``version.py``：实测
+    ``find_spec`` 给出的路径在磁盘上并不存在，``loader.get_data`` 也只是普通文件读取
+    （同样失败）。所以构建脚本会另外写一份版本文件放进包里，这里读它。
+    """
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        return meipass
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_plain_version(path: str) -> str:
+    """版本文件里只有版本号本身（不是 ``__version__ = ...``）。"""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read().strip()
+    except OSError:
+        return ""
+    return text if parse_version(text) else ""
+
+
 def bundled_version() -> str:
-    """内置 yt-dlp 的版本号；读不到时尝试用包元数据，再不行返回空串。"""
+    """内置 yt-dlp 的版本号；都读不到时返回空串（调用方会优先用户副本）。"""
     version = read_version_file(bundled_dir())
     if version:
         return version
-    try:  # 冻结包可能没有可读的 version.py
+    for candidate in (os.path.join(bundle_root(), BUNDLED_VERSION_FILENAME),
+                      os.path.join(bundle_root(), "build", "work",
+                                   BUNDLED_VERSION_FILENAME)):
+        version = _read_plain_version(candidate)
+        if version:
+            return version
+    try:
         from importlib.metadata import version as dist_version
 
         return dist_version("yt-dlp")

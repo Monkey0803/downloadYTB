@@ -14,6 +14,13 @@ fi
 
 APP_VERSION="$($PYTHON -c 'from app import __version__; print(__version__)')"
 
+# 冻结包运行期读不到 yt_dlp 的 version.py（代码在归档里，路径是假的），
+# 所以把内置版本号写成一个文件一起打进去，界面与诊断才能显示真实版本。
+mkdir -p build/work
+"$PYTHON" -c 'import yt_dlp.version; print(yt_dlp.version.__version__)' \
+    > build/work/yt_dlp_bundled_version.txt \
+    || printf '' > build/work/yt_dlp_bundled_version.txt
+
 "$PYTHON" -m PyInstaller \
     --noconfirm \
     --windowed \
@@ -21,6 +28,7 @@ APP_VERSION="$($PYTHON -c 'from app import __version__; print(__version__)')"
     --name "VideoDownloader" \
     --icon "$PWD/assets/app.icns" \
     --add-data "$PWD/assets:assets" \
+    --add-data "$PWD/build/work/yt_dlp_bundled_version.txt:." \
     --collect-all imageio_ffmpeg \
     --collect-all gallery_dl \
     --collect-all yt_dlp_ejs \
