@@ -3,7 +3,7 @@
 ## Project Structure
 
 - `main.py` is the application entry point.
-- `app/` contains the Tkinter UI (`gui.py`, `widgets.py`), download engines (`core.py`, `images.py`), settings, themes, localization, and macOS menubar integration.
+- `app/` contains the Tkinter UI (`gui.py`, `widgets.py`), download engines (`core.py`, `images.py`), settings, themes, localization, and macOS menubar integration. Pure helpers that used to live in `gui.py` now sit in `urlutil.py` (links, platform labels, folder names), `fspath.py` (asset paths, opening files) and `settings_io.py` (settings import/export); `gui.py` re-imports those names so `gui.parse_links`-style call sites and tests keep working.
 - `assets/` stores icons and logo variants.
 - `test_*.py` contains focused unit, GUI, packaging, and live-network checks.
 - `build/` contains the macOS and Windows PyInstaller scripts, plus
