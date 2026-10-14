@@ -69,11 +69,58 @@ class QueueDataTests(unittest.TestCase):
         self._enqueue(app, WEIBO, "weibo")
         self.assertEqual(gui.App.queue_items(app)[0]["platform"], "weibo")
 
-    def test_items_keep_only_url_and_platform(self):
-        """不做「选项快照」：存进去的只有这两个键（语义写进文档与提示）。"""
+    def test_items_keep_only_url_platform_and_kind(self):
+        """不做「选项快照」：只存定位信息（url/platform）与类型（kind）。
+
+        第 9 项加了图片入队，所以多了 kind 一个键；清晰度/字幕/保存位置这些
+        执行时该用**当时**设置的选项，一个都不能进队列。
+        """
         app = _FakeApp()
         self._enqueue(app, YOUTUBE)
-        self.assertEqual(set(gui.App.queue_items(app)[0]), {"url", "platform"})
+        item = gui.App.queue_items(app)[0]
+        self.assertEqual(set(item), {"url", "platform", "kind"})
+        for forbidden in ("height", "audio", "subtitle", "save_dir", "quality"):
+            self.assertNotIn(forbidden, item)
+
+    def test_kind_is_normalized(self):
+        self.assertEqual(gui.normalize_kind("image"), "image")
+        self.assertEqual(gui.normalize_kind("IMAGE"), "image")
+        for value in ("video", "", None, "垃圾", 7):
+            self.assertEqual(gui.normalize_kind(value), "video", value)
+
+    def test_image_enqueue_stores_the_kind(self):
+        app = _FakeApp()
+        gui.App.enqueue_url(app, WEIBO, kind="image")
+        self.assertEqual(gui.App.queue_items(app)[0]["kind"], "image")
+
+    def test_kind_defaults_to_video(self):
+        app = _FakeApp()
+        self._enqueue(app, YOUTUBE)
+        self.assertEqual(gui.App.queue_items(app)[0]["kind"], "video")
+
+    def test_queue_key_includes_the_kind(self):
+        """同一个链接既排视频又排图片是两件事，去重键必须带类型。"""
+        self.assertNotEqual(gui.queue_key({"url": "u", "kind": "video"}),
+                            gui.queue_key({"url": "u", "kind": "image"}))
+        self.assertEqual(gui.queue_key({"url": "u"}), ("u", "video"),
+                         "老条目没有 kind，按视频算")
+
+    def test_same_url_can_be_queued_as_video_and_image(self):
+        app = _FakeApp()
+        self._enqueue(app, WEIBO)
+        gui.App.enqueue_url(app, WEIBO, kind="image")
+        self.assertEqual(len(gui.App.queue_items(app)), 2)
+
+    def test_batch_enqueue_dedups_per_kind(self):
+        app = _FakeApp()
+        added, skipped = gui.App.enqueue_urls(app, [WEIBO, WEIBO, YOUTUBE],
+                                             kind="image")
+        self.assertEqual((added, skipped), (2, 1), "本批重复要跳过")
+        self.assertEqual({item["kind"] for item in gui.App.queue_items(app)},
+                         {"image"})
+        self.assertEqual(gui.App.enqueue_urls(app, [WEIBO], kind="image"), (0, 1))
+        self.assertEqual(gui.App.enqueue_urls(app, [WEIBO], kind="video"), (1, 0),
+                         "不同类别不算重复")
 
     def test_empty_url_is_rejected(self):
         app = _FakeApp()
@@ -182,6 +229,38 @@ class QueueDispatchTests(unittest.TestCase):
         self.assertEqual(lived, [WEIBO])
         self.assertEqual(self.app.current_page, "weibo")
 
+    def test_image_job_switches_to_the_image_panel(self):
+        """第 9 项：图片任务要切到图片面板再执行。"""
+        self.app.enqueue_url(WEIBO, kind="image")
+        page = self.app.pages["weibo"]
+        page.kind_var.set("video")            # 故意先停在视频面板
+        lived = []
+        image_panel = page.image_panel
+        original = image_panel.on_download
+        image_panel.on_download = lambda: lived.append(
+            (page.kind_var.get(), image_panel.url_entry.get()))
+        try:
+            self.assertTrue(self.app.advance_queue())
+        finally:
+            image_panel.on_download = original
+        self.assertEqual(lived, [("image", WEIBO)], "图片任务必须走图片面板")
+        self.assertEqual(page.kind_var.get(), "image")
+
+    def test_legacy_item_without_kind_runs_as_video(self):
+        """图片入队之前存的条目没有 kind，必须仍按视频执行（老设置文件不能失效）。"""
+        self.app.settings["download_queue"] = [{"url": WEIBO, "platform": "weibo"}]
+        page = self.app.pages["weibo"]
+        page.kind_var.set("image")
+        lived = []
+        video_panel = page.video_panel
+        original = video_panel.on_download
+        video_panel.on_download = lambda: lived.append(page.kind_var.get())
+        try:
+            self.assertTrue(self.app.advance_queue())
+        finally:
+            video_panel.on_download = original
+        self.assertEqual(lived, ["video"])
+
     def test_advance_respects_the_autostart_switch(self):
         self.app.enqueue_url(YOUTUBE)
         self.app.settings["queue_autostart"] = False
@@ -256,12 +335,73 @@ class QueuePanelTests(unittest.TestCase):
         self.panel._set_status = self._set_status
         settings_mod.save = _ORIGINAL_SAVE
 
-    def test_only_video_panels_offer_the_queue_button(self):
+    def test_both_panels_offer_the_queue_button(self):
+        """第 9 项翻了这个断言：图片面板以前明确「不该有」队列按钮。"""
         self.assertTrue(hasattr(self.panel, "queue_btn"))
         for key in ("weibo", "x", "instagram"):
-            image_panel = self.app.pages[key].image_panel
-            self.assertFalse(hasattr(image_panel, "queue_btn"),
-                             f"{key} 的图片面板不该有队列按钮")
+            page = self.app.pages[key]
+            self.assertTrue(hasattr(page.video_panel, "queue_btn"), key)
+            self.assertTrue(hasattr(page.image_panel, "queue_btn"), key)
+
+    def test_each_panel_enqueues_with_its_own_kind(self):
+        page = self.app.pages["weibo"]
+        kinds = []
+        original = gui.enqueue_from_entry
+        gui.enqueue_from_entry = lambda app, panel, kind: kinds.append(kind)
+        try:
+            page.image_panel.on_enqueue()
+            page.video_panel.on_enqueue()
+        finally:
+            gui.enqueue_from_entry = original
+        self.assertEqual(kinds, ["image", "video"])
+
+    def test_image_panel_enqueue_adds_an_image_job(self):
+        panel = self.app.pages["weibo"].image_panel
+        statuses = []
+        original = panel._set_status
+        panel._set_status = lambda text, error=False, **kw: statuses.append(
+            (text, error))
+        try:
+            panel.url_entry.set(WEIBO)
+            panel.on_enqueue()
+        finally:
+            panel._set_status = original
+        items = self.app.queue_items()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["kind"], "image")
+        self.assertTrue(statuses and statuses[0][1] is False, "应当报成功")
+
+    def test_image_panel_batch_enqueue_reports_counts(self):
+        panel = self.app.pages["weibo"].image_panel
+        statuses = []
+        original = panel._set_status
+        panel._set_status = lambda text, error=False, **kw: statuses.append(
+            (text, error))
+        try:
+            panel.url_entry.set(f"看这个{WEIBO}很好 https://x.com/a/status/1 "
+                                f"再来一次{WEIBO}")
+            panel.on_enqueue()
+        finally:
+            panel._set_status = original
+        items = self.app.queue_items()
+        self.assertEqual(len(items), 2, "两个不同链接入队，重复的那个跳过")
+        self.assertEqual({item["kind"] for item in items}, {"image"})
+        self.assertFalse(statuses[0][1])
+        self.assertIn("1", statuses[0][0], "跳过数要如实报告")
+
+    def test_image_panel_without_a_link_reports_it(self):
+        panel = self.app.pages["weibo"].image_panel
+        statuses = []
+        original = panel._set_status
+        panel._set_status = lambda text, error=False, **kw: statuses.append(
+            (text, error))
+        try:
+            panel.url_entry.set("")
+            panel.on_enqueue()
+        finally:
+            panel._set_status = original
+        self.assertEqual(self.app.queue_items(), [])
+        self.assertTrue(statuses and statuses[0][1] is True)
 
     def test_enqueue_adds_the_typed_url(self):
         self.panel.url_entry.set(YOUTUBE)
@@ -315,6 +455,26 @@ class QueuePageTests(unittest.TestCase):
         self.app.update_idletasks()
         card = self._rows()[0]
         self.assertGreaterEqual(card.body.winfo_height(), card.body.winfo_reqheight())
+
+    def _row_texts(self, card):
+        texts = []
+        for child in card.body.winfo_children():
+            try:
+                texts.append(str(child.cget("text")))
+            except Exception:
+                pass
+        return texts
+
+    def test_image_row_is_labelled(self):
+        """图片任务在队列里要标出来，否则和视频任务长得一模一样。"""
+        self.app.enqueue_url(WEIBO, kind="image")
+        self.app.enqueue_url(YOUTUBE)
+        self.page.refresh()
+        self.app.update_idletasks()
+        rows = self._rows()
+        self.assertIn(i18n.tr("image_segment"), " ".join(self._row_texts(rows[0])))
+        self.assertNotIn(i18n.tr("image_segment"),
+                         " ".join(self._row_texts(rows[1])))
 
     def test_remove_deletes_only_that_row(self):
         self.app.enqueue_url(YOUTUBE)

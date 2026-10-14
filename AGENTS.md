@@ -139,11 +139,21 @@ hardcoded-text check in `test_i18n.py` now flags a display name reintroduced as 
 
 ## Download Queue
 
-The queue stores **only a URL and a platform key** — deliberately not a snapshot of the
-quality/subtitle/save-location options. Executing a job therefore reuses the panel's normal
-flow: switch page, fill the URL, call `on_download()` (which probes first) and let the
-current settings apply. That keeps the queue out of the core download state machine; the
-trade-off is stated in the page hint so users are not surprised.
+The queue stores **only a URL, a platform key and the kind** (`video`/`image`) — deliberately
+not a snapshot of the quality/subtitle/save-location options. Executing a job therefore reuses
+the panel's normal flow: switch page (and `kind_var`, so an image job lands on the image panel),
+fill the URL, call `on_download()` (which probes first) and let the current settings apply. That
+keeps the queue out of the core download state machine; the trade-off is stated in the page hint
+so users are not surprised.
+
+`kind` is what made image queueing (ROADMAP item 9) possible, and it has two consequences worth
+remembering:
+
+- Deduplication is keyed by `(url, kind)` (`gui.queue_key()`): the same link queued as a video and
+  as an image is two legitimate jobs. Items **without** a `kind` are pre-item-9 data and must keep
+  running as video (`normalize_kind()` treats anything but `image` as video).
+- Both panels share one entry point, `gui.enqueue_from_entry(app, panel, kind)`, so the batch-paste
+  counting/reporting behaviour cannot drift between the video and image pages.
 
 Batch pasting is split deliberately: `gui.parse_links()` **only extracts** links (order
 preserved, duplicates kept), while `App.enqueue_urls()` owns deduplication and counting. Doing

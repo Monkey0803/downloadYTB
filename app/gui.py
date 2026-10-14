@@ -122,6 +122,42 @@ def _sanitize_filename(text: str) -> str:
 _URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
 
+def normalize_kind(value) -> str:
+    """下载类型归一化：只有 ``image`` 是图片，其余（含缺省）都是视频。
+
+    队列条目里没写 kind 的是老数据（图片入队之前存的），一律当视频，不能丢。
+    """
+    return "image" if str(value or "").strip().lower() == "image" else "video"
+
+
+def queue_key(item) -> tuple:
+    """队列去重键：同一个链接可以既排视频又排图片，所以键里必须带类型。"""
+    item = item or {}
+    return (str(item.get("url") or ""), normalize_kind(item.get("kind")))
+
+
+def enqueue_from_entry(app, panel, kind) -> None:
+    """把面板输入框里的链接加入队列（视频页与图片页共用）。
+
+    输入框里有多个链接时（整段粘贴）全部排队，并如实报告新增与跳过数。
+    """
+    urls = parse_links(panel.url_entry.get().strip())
+    if not urls:
+        panel._set_status(i18n.tr("queue_need_link"), error=True)
+        return
+    if len(urls) == 1:
+        app.enqueue_url(urls[0], kind=kind)
+        panel._set_status(i18n.tr("queue_added", url=urls[0]), ok=True)
+        return
+    added, skipped = app.enqueue_urls(urls, kind=kind)
+    if not added:
+        panel._set_status(i18n.tr("queue_all_duplicated", skipped=skipped),
+                          error=True)
+        return
+    panel._set_status(i18n.tr("queue_batch_added", n=added, skipped=skipped),
+                      ok=True)
+
+
 def parse_links(text) -> list:
     """从任意文本里挑出链接，保持出现顺序（**不去重**）。
 
@@ -1538,26 +1574,8 @@ class VideoPanel(TFrame):
         open_in_file_manager(self._last_file)
 
     def on_enqueue(self):
-        """把当前链接加入队列（选项不冻结，执行时用当时的设置）。
-
-        输入框里出现多个链接时（例如整段粘贴）全部排队，并如实报告数量。
-        """
-        text = self.url_entry.get().strip()
-        urls = parse_links(text)
-        if not urls:
-            self._set_status(i18n.tr("queue_need_link"), error=True)
-            return
-        if len(urls) == 1:
-            self.app.enqueue_url(urls[0])
-            self._set_status(i18n.tr("queue_added", url=urls[0]), ok=True)
-            return
-        added, skipped = self.app.enqueue_urls(urls)
-        if not added:
-            self._set_status(i18n.tr("queue_all_duplicated", skipped=skipped),
-                             error=True)
-            return
-        self._set_status(i18n.tr("queue_batch_added", n=added, skipped=skipped),
-                         ok=True)
+        """把当前链接加入队列（选项不冻结，执行时用当时的设置）。"""
+        enqueue_from_entry(self.app, self, "video")
 
     def on_open_file(self):
         path = self._last_file
@@ -1622,6 +1640,10 @@ class ImagePanel(TFrame):
         self.probe_btn = PillButton(row, i18n.tr("probe"), command=self.on_probe,
                                     font=f.f_btn, width=68, bg_role="CARD")
         self.probe_btn.pack(side="left", padx=(8, 0))
+        self.queue_btn = PillButton(row, i18n.tr("queue_add"),
+                                    command=self.on_enqueue, font=f.f_btn, width=96,
+                                    bg_role="CARD")
+        self.queue_btn.pack(side="left", padx=(8, 0))
 
         # —— 卡片 2：图片选择 ——
         self.selection_card = GlassCard(self)
@@ -1790,6 +1812,10 @@ class ImagePanel(TFrame):
         self.all_check.refresh()
         if not self._downloading:
             self.download_btn.configure_state("normal" if n else "disabled")
+
+    def on_enqueue(self):
+        """把当前链接加入队列，标记为图片任务（执行时仍用当时的设置）。"""
+        enqueue_from_entry(self.app, self, "image")
 
     def on_probe(self):
         if self._busy:
@@ -2276,6 +2302,9 @@ class QueuePage(TFrame):
             anchor="w", fill="x")
         meta = [i18n.tr("queue") + f" {index + 1}",
                 platform_label(item.get("platform"))]
+        if normalize_kind(item.get("kind")) == "image":
+            # 只有图片任务才标出来：视频是老行为，不必给每行都加噪音
+            meta.append(i18n.tr("image_segment"))
         TLabel(card.body, text="　·　".join(bit for bit in meta if bit),
                font=self.app.f_small, bg_role="CARD", fg_role="TEXT_SUB",
                anchor="w").pack(anchor="w", fill="x", pady=(2, 8))
@@ -3704,35 +3733,38 @@ class App(tk.Tk):
         settings.save(self.settings)
         self._refresh_queue_page()
 
-    def enqueue_url(self, url, platform=""):
-        """把链接加入队列；只存 URL 与平台，不冻结选项（见 QueuePage 说明）。"""
+    def enqueue_url(self, url, platform="", kind="video"):
+        """把链接加入队列；只存 URL、平台与类型，不冻结选项（见 QueuePage 说明）。"""
         url = (url or "").strip()
         if not url:
             return False
         items = self.queue_items()
-        items.append({"url": url, "platform": platform or detect_platform(url)})
+        items.append({"url": url, "platform": platform or detect_platform(url),
+                      "kind": normalize_kind(kind)})
         self.set_queue_items(items)
         return True
 
-    def enqueue_urls(self, urls):
+    def enqueue_urls(self, urls, kind="video"):
         """批量入队，返回 (新增数, 跳过数)。
 
-        跳过 = 队列里已有 或 本批重复。用户从聊天记录里复制时经常重复粘贴，
-        静默去重比塞一堆重复项友好；数量会如实反馈给界面。
+        跳过 = 队列里已有（**同类型**）或 本批重复。用户从聊天记录里复制时经常重复
+        粘贴，静默去重比塞一堆重复项友好；数量会如实反馈给界面。
         """
-        existing = {item.get("url") for item in self.queue_items()}
+        kind = normalize_kind(kind)
+        existing = {queue_key(item) for item in self.queue_items()}
         items = list(self.queue_items())
         room = max(0, self.QUEUE_LIMIT - len(items))
         added = 0
         skipped = 0
         for url in urls or []:
             url = (url or "").strip()
+            key = (url, kind)
             # 队列满了也算「跳过」，否则返回的 added 会虚报（set_queue_items 会截断）
-            if not url or url in existing or added >= room:
+            if not url or key in existing or added >= room:
                 skipped += 1
                 continue
-            items.append({"url": url, "platform": detect_platform(url)})
-            existing.add(url)
+            items.append({"url": url, "platform": detect_platform(url), "kind": kind})
+            existing.add(key)
             added += 1
         if added:
             self.set_queue_items(items)
@@ -3837,8 +3869,9 @@ class App(tk.Tk):
         page = self.pages.get(item.get("platform") or detect_platform(url))
         if page is None:
             return False
+        kind = normalize_kind(item.get("kind"))
         if getattr(page, "kind_var", None) is not None:
-            page.kind_var.set("video")       # 队列里排的都是视频链接
+            page.kind_var.set(kind)          # 图片任务要切到图片面板再执行
         panel = _active_panel(page)
         if panel is None or not hasattr(panel, "on_download"):
             return False
