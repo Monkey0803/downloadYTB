@@ -46,7 +46,7 @@ Use Python 3 style, four-space indentation, descriptive `snake_case` functions a
 ## Testing Guidelines
 
 Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local changes. The offline suite is `test_i18n.py`, `test_save_dir_sync.py`, `test_weibo.py`, `test_browser_cookies.py`, `test_audio_options.py`, `test_windowing.py`, `test_diagnostics.py`, `test_shortcuts.py`, `test_platforms.py`, `test_dock.py`, `test_video_options.py`, `test_image_skip.py`, `test_video_panel.py`, `test_playlist.py`, `test_taskbar.py`, `test_taskbar_kde.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`,
-`test_release_notes.py`, `test_installers.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, `test_menubar.py`, `test_contrast.py`, `test_font_scale.py`, `test_queue.py`, `test_platform_identity.py`, `test_post_folder.py`, `test_ytdlp_update.py`, `test_logging.py`, `test_thumbnails.py`, `test_proxy.py`, `test_appupdate.py`, `test_after_download.py`, `test_embed.py`, `test_about.py`, and `test_settings_io.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
+`test_release_notes.py`, `test_installers.py`, `test_chapters.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, `test_menubar.py`, `test_contrast.py`, `test_font_scale.py`, `test_queue.py`, `test_platform_identity.py`, `test_post_folder.py`, `test_ytdlp_update.py`, `test_logging.py`, `test_thumbnails.py`, `test_proxy.py`, `test_appupdate.py`, `test_after_download.py`, `test_embed.py`, `test_about.py`, and `test_settings_io.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
 hops back with `self.app.after(0, callback)`. That hop **requires a running
 `mainloop()`** — Tk raises `RuntimeError: main thread is not in main loop` when a
 non-main thread calls `after` while the main thread is only pumping `update()`, so a test
@@ -274,6 +274,35 @@ Three settings (`embed_subtitles`, `embed_thumbnail`, `embed_metadata`, all off)
 - `mutagen` is required for mp3/m4a cover embedding and is **not** a yt-dlp dependency, so it is in
   `requirements.txt` and each build script passes `--hidden-import mutagen` (yt-dlp imports it
   lazily, so PyInstaller would otherwise drop it).
+
+## Chapters, SponsorBlock And Rate Limit
+
+`core.media_postprocessors()` (ROADMAP item 15) assembles the full postprocessor list for video and
+playlist downloads. Same trap as embedding, same conclusion:
+
+- **`split_chapters` and `sponsorblock_mark` / `sponsorblock_remove` are CLI-only keys.** They appear
+  in `yt_dlp/options.py` and are translated in `yt_dlp/__init__.py`; the Python API ignores them. The
+  CLI's own generator shows what to build instead: a `SponsorBlock` step, a `ModifyChapters` step and
+  an `FFmpegSplitChapters` step. `test_chapters.py` has a guard asserting none of those keys ever
+  reach the options.
+- **Order is a constraint, not a preference**: `ModifyChapters` must run *before* `FFmpegMetadataPP`
+  (the CLI says so in a comment) — otherwise the metadata is written into the version that still has
+  the sponsor segments and the chapters no longer match the cut file. Splitting runs last.
+- `ratelimit` and `concurrent_fragment_downloads` **are** real API parameters (the downloaders read
+  them from `params`). Two details: `ratelimit` is in **bytes per second** (the UI stores KB/s), and
+  `concurrent_fragment_downloads` only affects native HLS/DASH — 1 means "let yt-dlp decide", so 1 is
+  never passed. Both are clamped (`RATELIMIT_MAX_KB`, `MAX_FRAGMENT_WORKERS`).
+- **SponsorBlock categories are split into segments and POIs.** `poi_highlight` / `chapter` are points
+  in time, not ranges: asking to *cut* them is meaningless, so they are only allowed in mark mode. The
+  list is cross-checked against yt-dlp's `SponsorBlockPP.CATEGORIES` so a renamed category is not
+  silently dropped.
+- Limits are applied through `core.set_download_limits()`, the same module-level pattern as cookies
+  and the proxy, so the panels do not have to thread them through every call. The **audio path takes
+  no chapter settings on purpose** (`download_audio` has no `extras` parameter) — chapters belong to
+  a video container, and pretending otherwise would be worse than not offering it.
+- In the UI these are selectors, not text fields (`RATELIMIT_CHOICES`, `FRAGMENT_CHOICES`), so no
+  invalid value can be stored; the selected value is taken **by position**, because the labels follow
+  the UI language while the stored number must not.
 
 ## After-download Action
 

@@ -69,6 +69,8 @@ class App(tk.Tk):
         i18n.set_language(self.settings.get("language", "zh_CN"))
         theme.set_mode(self.settings.get("theme", "system"))
         core.set_browser_cookies(self.settings.get("browser_cookies", ""))
+        core.set_download_limits(self.settings.get("ratelimit_kb", 0),
+                                 self.settings.get("fragment_workers", 1))
         images.set_browser_cookies(self.settings.get("browser_cookies", ""))
         core.set_cookie_file(self.settings.get("cookie_file", ""))
         images.set_cookie_file(self.settings.get("cookie_file", ""))
@@ -234,6 +236,14 @@ class App(tk.Tk):
             "subtitles": bool(self.settings.get("embed_subtitles", False)),
             "thumbnail": bool(self.settings.get("embed_thumbnail", False)),
             "metadata": bool(self.settings.get("embed_metadata", False)),
+        }
+
+    def extras_settings(self):
+        """章节切分与 SponsorBlock 的设置，交给引擎翻译成后处理器（第 15 项）。"""
+        return {
+            "split_chapters": bool(self.settings.get("split_chapters", False)),
+            "sponsorblock": str(self.settings.get("sponsorblock", "off") or "off"),
+            "categories": str(self.settings.get("sponsorblock_categories", "") or ""),
         }
 
     def is_idle(self):

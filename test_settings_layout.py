@@ -22,7 +22,7 @@ EXPECTED = (
     ("settings_section_save", ["default_save"]),
     ("settings_section_cookies", ["browser_cookie", "platform_cookies"]),
     ("settings_section_download", ["download_feedback", "subtitles", "embed_card",
-                                  "after_download_card"]),
+                                  "after_download_card", "chapters_card"]),
     ("settings_section_advanced", ["shortcuts", "ytdlp_card", "proxy_card",
                                    "diagnostics", "version_card",
                                    "settings_io_card"]),
@@ -82,8 +82,8 @@ class SettingsGroupingTests(unittest.TestCase):
     def test_every_card_is_accounted_for(self):
         """分组是纯布局改动，卡片数量不该变。"""
         cards = [text for kind, text in self._structure() if kind == "card"]
-        self.assertEqual(len(cards), 16)
-        self.assertEqual(len(set(cards)), 16, "不该出现重复卡片标题")
+        self.assertEqual(len(cards), 17)
+        self.assertEqual(len(set(cards)), 17, "不该出现重复卡片标题")
 
     def test_section_titles_are_localized(self):
         titles = [text for kind, text in self._structure() if kind == "section"]

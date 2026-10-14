@@ -331,6 +331,35 @@ class PlaylistUiTests(unittest.TestCase):
         # 有勾选时补零宽度按最大勾选下标（9）而不是「下载范围」的 25
         self.assertEqual(captured["playlist_size_hint"], 9)
 
+    def test_download_params_carry_the_chapter_switches(self):
+        """第 15 项：章节切分与 SponsorBlock 也要由面板交给引擎。
+
+        离线测试只能验到「参数带上了」——真正的切分/剪切产物需要带章节且有赞助片段的
+        视频才能验证，那一步本仓库没做。
+        """
+        self.panel._probe_done(self._playlist_info())
+        # 链接要与解析结果一致，否则 on_download 会走「重新解析」分支而不组装参数
+        self.panel.url_var.set(self.panel._info.url)
+        self.app.settings["split_chapters"] = True
+        self.app.settings["sponsorblock"] = "remove"
+        self.app.settings["sponsorblock_categories"] = "sponsor,intro"
+        try:
+            captured = {}
+            original = gui.VideoPanel._start_download
+            gui.VideoPanel._start_download = lambda self, resume: captured.update(
+                self._dl_params)
+            try:
+                self.panel.on_download()
+            finally:
+                gui.VideoPanel._start_download = original
+        finally:
+            self.app.settings["split_chapters"] = False
+            self.app.settings["sponsorblock"] = "off"
+            self.app.settings["sponsorblock_categories"] = ""
+        self.assertEqual(captured["extras"], {"split_chapters": True,
+                                              "sponsorblock": "remove",
+                                              "categories": "sponsor,intro"})
+
     def test_download_params_carry_the_embed_switches(self):
         """第 10 项：面板要把「嵌入到文件」三个开关交给引擎。"""
         self.panel._probe_done(self._playlist_info())

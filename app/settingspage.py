@@ -23,6 +23,11 @@ from . import (about, applog, appupdate, browser_cookies, core, diagnostics, i18
                images, menubar, netproxy, platforms, postaction, settings,
                settings_io, taskbar, theme, ytdlp_update)
 from .dialogs import SubtitleLanguagePicker
+
+# 限速与分片并发的候选值：界面显示的是标签（随语言变），存的是这里的数值。
+# 用选择器而不是文本框：省掉解析，也不可能存进非法值。
+RATELIMIT_CHOICES = (0, 256, 512, 1024, 2048)
+FRAGMENT_CHOICES = (1, 2, 4, 8)
 from .fspath import LOGO_OPTIONS, logo_icon_path, open_in_file_manager, open_path
 from .pages import PageHeader
 from .urlutil import PLATFORM_LABEL_KEYS
@@ -403,6 +408,82 @@ class SettingsPage(TFrame):
         _pack_wrapped_hint(ba, app, i18n.tr("after_download_hint"),
                            bg_role="CARD", pady=(8, 0))
         self._track_card("after_download", card_after, ba)
+
+        # —— 章节、赞助片段与限速 ——
+        card_ch = GlassCard(self._scroll_body)
+        card_ch.set_height(268)
+        card_ch.pack(fill="x", pady=(0, 12))
+        bch = card_ch.body
+        TLabel(bch, text=i18n.tr("chapters_card"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+
+        self.split_chapters_var = tk.BooleanVar(
+            value=bool(app.settings.get("split_chapters", False)))
+        self.split_chapters_pill = CheckPill(
+            bch, i18n.tr("split_chapters"), self.split_chapters_var,
+            font=f.f_body, bg_role="CARD",
+            command=self._on_split_chapters_change,
+            width=_check_pill_width(f.f_body, i18n.tr("split_chapters")))
+        self.split_chapters_pill.pack(anchor="w", pady=(10, 0))
+
+        sb_row = TFrame(bch, bg_role="CARD")
+        sb_row.pack(fill="x", pady=(10, 0))
+        TLabel(sb_row, text=i18n.tr("sponsorblock"), font=f.f_body,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+        self.sponsorblock_var = tk.StringVar(
+            value=self._sponsorblock_label(app.settings.get("sponsorblock", "off")))
+        self.sponsorblock_var.trace_add(
+            "write", lambda *a: self._on_sponsorblock_change())
+        self.sponsorblock_select = PillSelect(
+            sb_row, self.sponsorblock_var,
+            values=[self._sponsorblock_label(code)
+                    for code in core.SPONSORBLOCK_MODES],
+            font=f.f_btn, width=150)
+        self.sponsorblock_select.pack(side="left")
+
+        cats_row = TFrame(bch, bg_role="CARD")
+        cats_row.pack(fill="x", pady=(10, 0))
+        TLabel(cats_row, text=i18n.tr("sponsorblock_categories"), font=f.f_body,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+        self.sponsorblock_cats_var = tk.StringVar(
+            value=str(app.settings.get("sponsorblock_categories", "") or ""))
+        self.sponsorblock_cats_entry = RoundEntry(
+            cats_row, textvariable=self.sponsorblock_cats_var, font=f.f_body)
+        self.sponsorblock_cats_entry.pack(side="left", fill="x", expand=True)
+        self.sponsorblock_apply_btn = PillButton(
+            cats_row, i18n.tr("sponsorblock_apply"),
+            command=self._apply_sponsorblock_categories, font=f.f_btn,
+            width=72, bg_role="CARD")
+        self.sponsorblock_apply_btn.pack(side="left", padx=(8, 0))
+        self.sponsorblock_status = TLabel(cats_row, text="", font=f.f_small,
+                                          bg_role="CARD", fg_role="TEXT_SUB")
+        self.sponsorblock_status.pack(side="left", padx=(10, 0))
+
+        limit_row = TFrame(bch, bg_role="CARD")
+        limit_row.pack(fill="x", pady=(10, 0))
+        TLabel(limit_row, text=i18n.tr("ratelimit"), font=f.f_body,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(0, 8))
+        self.ratelimit_var = tk.StringVar(
+            value=self._ratelimit_label(app.settings.get("ratelimit_kb", 0)))
+        self.ratelimit_var.trace_add("write", lambda *a: self._on_download_limits_change())
+        self.ratelimit_select = PillSelect(
+            limit_row, self.ratelimit_var,
+            values=[self._ratelimit_label(v) for v in RATELIMIT_CHOICES],
+            font=f.f_btn, width=110)
+        self.ratelimit_select.pack(side="left")
+        TLabel(limit_row, text=i18n.tr("fragment_workers"), font=f.f_body,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(side="left", padx=(16, 8))
+        self.fragments_var = tk.StringVar(value=str(app.settings.get("fragment_workers", 1)))
+        self.fragments_var.trace_add("write", lambda *a: self._on_download_limits_change())
+        self.fragments_select = PillSelect(
+            limit_row, self.fragments_var,
+            values=[str(v) for v in FRAGMENT_CHOICES], font=f.f_btn, width=80)
+        self.fragments_select.pack(side="left")
+
+        _pack_wrapped_hint(bch, app, i18n.tr("chapters_hint"), bg_role="CARD",
+                           pady=(8, 0))
+        self._track_card("chapters", card_ch, bch)
+        self._apply_download_limits(save=False)
 
         self._section("settings_section_advanced")
 
@@ -906,6 +987,79 @@ class SettingsPage(TFrame):
             self.app.set_font_scale(self.app.settings.get("font_scale", "standard"))
         except tk.TclError:
             pass
+
+    # —— 章节 / SponsorBlock / 限速 ——
+
+    def _sponsorblock_label(self, value):
+        return i18n.tr({
+            "mark": "sponsorblock_mark",
+            "remove": "sponsorblock_remove",
+        }.get(str(value or "").strip().lower(), "sponsorblock_off"))
+
+    def _on_split_chapters_change(self):
+        app = self.app
+        app.settings["split_chapters"] = bool(self.split_chapters_var.get())
+        settings.save(app.settings)
+
+    def _on_sponsorblock_change(self):
+        label = self.sponsorblock_var.get()
+        code = next((c for c in core.SPONSORBLOCK_MODES
+                     if self._sponsorblock_label(c) == label), "off")
+        self.app.settings["sponsorblock"] = code
+        settings.save(self.app.settings)
+        applog.log_event("sponsorblock_mode", mode=code)
+
+    def _apply_sponsorblock_categories(self):
+        """保存分类并如实回报哪些被忽略（写错分类不该静默生效或静默失效）。"""
+        app = self.app
+        raw = self.sponsorblock_cats_entry.get().strip()
+        app.settings["sponsorblock_categories"] = raw
+        settings.save(app.settings)
+        mode = app.settings.get("sponsorblock", "off")
+        kept = core.sponsorblock_categories(raw, mode=mode)
+        if not raw:
+            text = i18n.tr("sponsorblock_categories_default", n=len(kept))
+        else:
+            text = i18n.tr("sponsorblock_categories_kept", kept=", ".join(kept))
+        self.sponsorblock_status.configure(text=ellipsize(text, 60))
+        applog.log_event("sponsorblock_categories", kept=len(kept), mode=mode)
+
+    def _ratelimit_label(self, value):
+        try:
+            kb = int(value)
+        except (TypeError, ValueError):
+            kb = 0
+        if kb <= 0:
+            return i18n.tr("ratelimit_unlimited")
+        if kb >= 1024:
+            return f"{kb / 1024:g} MB/s"
+        return f"{kb} KB/s"
+
+    def _selected_index(self, var, choices):
+        """按「标签在候选里的位置」取值：文案随语言变，位置不会变。"""
+        try:
+            return choices.index(var.get())
+        except ValueError:
+            return 0
+
+    def _on_download_limits_change(self):
+        self._apply_download_limits(save=True)
+
+    def _apply_download_limits(self, save=True):
+        """把限速与分片并发交给引擎（模块级状态，与 Cookie / 代理同一套做法）。"""
+        app = self.app
+        kb = RATELIMIT_CHOICES[min(self._selected_index(self.ratelimit_var,
+                                                        [self._ratelimit_label(v)
+                                                         for v in RATELIMIT_CHOICES]),
+                                   len(RATELIMIT_CHOICES) - 1)]
+        workers = FRAGMENT_CHOICES[min(self._selected_index(self.fragments_var,
+                                                            [str(v) for v in FRAGMENT_CHOICES]),
+                                       len(FRAGMENT_CHOICES) - 1)]
+        app.settings["ratelimit_kb"] = kb
+        app.settings["fragment_workers"] = workers
+        if save:
+            settings.save(app.settings)
+        core.set_download_limits(kb, workers)
 
     def _open_about(self):
         """集中入口：版本、依赖、保存位置、日志路径都在这里看。"""

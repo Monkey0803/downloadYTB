@@ -53,6 +53,70 @@ def set_cookie_file(path: str):
     browser_cookies.set_cookie_file(path)
 
 
+# —— 章节 / SponsorBlock / 限速（ROADMAP 第 15 项）——
+
+# SponsorBlock 模式：不处理 / 只把标记写进章节 / 把片段剪掉
+SPONSORBLOCK_MODES = ("off", "mark", "remove")
+# 可剪切的「段落」分类：poi_highlight / chapter 是时间点而非区间，不能剪
+SPONSORBLOCK_SEGMENT_CATEGORIES = ("sponsor", "intro", "outro", "selfpromo", "preview",
+                                   "filler", "interaction", "music_offtopic", "hook")
+SPONSORBLOCK_POI_CATEGORIES = ("poi_highlight", "chapter")
+
+# 限速上限 100 MB/s、分片并发上限 16：再大也没有意义，只会掩盖填错的数字
+RATELIMIT_MAX_KB = 100 * 1024
+MAX_FRAGMENT_WORKERS = 16
+
+_download_limits = {"ratelimit": None, "fragments": None}
+
+
+def set_download_limits(ratelimit_kb=0, fragment_workers=1):
+    """记录限速（KB/s）与分片并发，供后续所有 yt-dlp 下载使用。
+
+    与 Cookie / 代理同样走模块级状态：这三个值来自设置，下载函数不必逐个透传。
+    0 / 1 表示不传该参数（保持 yt-dlp 默认行为）。
+    """
+    def _int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    kb = max(0, min(_int(ratelimit_kb, 0), RATELIMIT_MAX_KB))
+    workers = max(1, min(_int(fragment_workers, 1), MAX_FRAGMENT_WORKERS))
+    _download_limits["ratelimit"] = kb * 1024 if kb else None
+    _download_limits["fragments"] = workers if workers > 1 else None
+
+
+def download_limits() -> dict:
+    """当前生效的限速参数（诊断报告与测试用）。"""
+    return dict(_download_limits)
+
+
+def sponsorblock_categories(value=None, mode="remove") -> list:
+    """把用户填的分类归一化成列表。
+
+    空 = 用内置的段落分类；未知分类忽略；剪切模式下去掉 poi_highlight / chapter
+    （它们是时间点，没有可剪的区间，yt-dlp 收下也不会做任何事）。
+    """
+    allowed = set(SPONSORBLOCK_SEGMENT_CATEGORIES)
+    if mode != "remove":
+        allowed |= set(SPONSORBLOCK_POI_CATEGORIES)
+    if isinstance(value, (list, tuple, set)):
+        raw = [str(item) for item in value]
+    else:
+        raw = str(value or "").replace("，", ",").split(",")
+    picked = [item.strip().lower() for item in raw if item and item.strip()]
+    wanted = [item for item in picked if item in allowed]
+    if not wanted:
+        wanted = [c for c in SPONSORBLOCK_SEGMENT_CATEGORIES if c in allowed]
+    seen, ordered = set(), []
+    for item in wanted:
+        if item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
 # 进度回调签名: callback(percent: float|None, speed_text: str, eta_text: str, status: str)
 ProgressCallback = Callable[[Optional[float], str, str, str], None]
 
@@ -217,6 +281,12 @@ def _base_opts(with_cookies: bool = True, platform: Optional[str] = None) -> dic
         opts.update(browser_cookies.ytdlp_options(platform))
     # yt-dlp 不读 HTTP(S)_PROXY 环境变量，代理必须显式传参（netproxy 已处理优先级）
     opts.update(netproxy.ytdlp_options())
+    # 限速与分片并发（第 15 项）：这两个键 Python API 直接认，不像嵌入那些只有 CLI 认
+    limits = _download_limits
+    if limits["ratelimit"]:
+        opts["ratelimit"] = limits["ratelimit"]
+    if limits["fragments"]:
+        opts["concurrent_fragment_downloads"] = limits["fragments"]
     return opts
 
 
@@ -241,7 +311,7 @@ class _PostprocessLogger:
 
 
 def embed_postprocessors(subtitles=False, thumbnail=False, metadata=False,
-                         keep_subtitles=False, **_) -> list:
+                         keep_subtitles=False, add_chapters=False, **_) -> list:
     """把「嵌入到文件」翻译成 yt-dlp 的**后处理器**列表（第 10 项）。
 
     关键坑（实测踩到）：``addmetadata`` / ``embedsubtitles`` / ``embedthumbnail``
@@ -259,12 +329,49 @@ def embed_postprocessors(subtitles=False, thumbnail=False, metadata=False,
         # 只有用户本来就勾了「下载字幕」才保留 .srt，否则嵌入完就删（产物干净）
         posts.append({"key": "FFmpegEmbedSubtitle",
                       "already_have_subtitle": bool(keep_subtitles)})
-    if metadata:
-        posts.append({"key": "FFmpegMetadata", "add_metadata": True,
-                      "add_chapters": False, "add_infojson": False})
+    if metadata or add_chapters:
+        # add_chapters 单独打开也要建这个后处理器：SponsorBlock 的「标记」模式
+        # 就是靠它把标记写成章节，没有这一步标记哪儿都不会出现
+        posts.append({"key": "FFmpegMetadata", "add_metadata": bool(metadata),
+                      "add_chapters": bool(add_chapters), "add_infojson": False})
     if thumbnail:
         # already_have_thumbnail=True 保住那张 jpg（提示里承诺过会留一张封面）
         posts.append({"key": "EmbedThumbnail", "already_have_thumbnail": True})
+    return posts
+
+
+def media_postprocessors(embed=None, extras=None, subtitles=False) -> list:
+    """按 CLI 的顺序拼出完整后处理器列表（第 15 项）。
+
+    顺序来自 yt-dlp 命令行层的硬约束（见 yt_dlp/__init__.py 的 get_postprocessors）：
+    SponsorBlock 取数据 → ModifyChapters 剪切（**必须在 FFmpegMetadataPP 之前**，
+    否则元数据先写进了带广告片段的那一版）→ 嵌入/元数据 → 章节切分放最后。
+
+    另外三种「只有 CLI 认」的键不要再用：``split_chapters`` 只出现在 options.py，
+    ``sponsorblock_mark`` / ``sponsorblock_remove`` 也一样——走 Python API 传它们
+    什么都不会发生，和第 10 项的 addmetadata 是同一个坑。
+    """
+    embedding = dict(embed or {})
+    extras = dict(extras or {})
+    mode = str(extras.get("sponsorblock") or "off").strip().lower()
+    if mode not in SPONSORBLOCK_MODES:
+        mode = "off"
+    split = bool(extras.get("split_chapters"))
+
+    posts = []
+    categories = []
+    if mode != "off":
+        categories = sponsorblock_categories(extras.get("categories"), mode=mode)
+        # after_filter：等格式筛选完再查，避免为不会下载的格式白跑一次接口
+        posts.append({"key": "SponsorBlock", "categories": categories,
+                      "when": "after_filter"})
+    if mode == "remove":
+        posts.append({"key": "ModifyChapters",
+                      "remove_sponsor_segments": categories})
+    posts += embed_postprocessors(keep_subtitles=bool(subtitles),
+                                  add_chapters=(mode == "mark"), **embedding)
+    if split:
+        posts.append({"key": "FFmpegSplitChapters"})
     return posts
 
 
@@ -782,6 +889,7 @@ def download_video(
     subtitles: bool = False,
     subtitle_langs=None,
     embed=None,
+    extras=None,
 ) -> str:
     """下载视频（指定最大清晰度），由 ffmpeg 合并为单个 mp4，返回文件路径。
 
@@ -810,7 +918,7 @@ def download_video(
         opts.update(subtitle_options(subtitle_langs))
     if embedding.get("thumbnail"):
         opts["writethumbnail"] = True          # 这个键 Python API 认（写文件用）
-    posts = embed_postprocessors(keep_subtitles=bool(subtitles), **embedding)
+    posts = media_postprocessors(embed=embedding, extras=extras, subtitles=subtitles)
     if posts:
         opts["postprocessors"] = posts
         # no_warnings 必须先关掉：yt-dlp 在 no_warnings 下**根本不调用** logger，
@@ -923,6 +1031,7 @@ def download_playlist(
     playlist_total: Optional[int] = None,
     playlist_size_hint: Optional[int] = None,
     playlist_items=None,
+    extras=None,
 ) -> List[str]:
     """下载播放列表，返回所有产物路径（按列表顺序）。
 
@@ -960,7 +1069,7 @@ def download_playlist(
         opts.update(subtitle_options(subtitle_langs))
     if embedding.get("thumbnail"):
         opts["writethumbnail"] = True
-    posts = embed_postprocessors(keep_subtitles=bool(subtitles), **embedding)
+    posts = media_postprocessors(embed=embedding, extras=extras, subtitles=subtitles)
     if posts:
         opts["postprocessors"] = posts
         opts["no_warnings"] = False

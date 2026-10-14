@@ -685,6 +685,7 @@ class VideoPanel(TFrame):
                           and bool(self.subtitle_var.get())),
             "subtitle_langs": self.app.settings.get("subtitle_langs", ""),
             "embed": self.app.embed_settings(),
+            "extras": self.app.extras_settings(),
             # 只有解析到播放列表时才可能扩大下载范围；否则固定为「仅当前视频」
             "is_playlist": bool(self._info.playlist_count),
             "playlist_limit": (self._playlist_limit()
@@ -887,7 +888,8 @@ class VideoPanel(TFrame):
                                                bitrate_kbps=p["audio_bitrate"],
                                                format_id=p["audio_format_id"],
                                                audio_format=p["audio_format"],
-                                               embed=p["embed"])
+                                               embed=p["embed"],
+                                               extras=p["extras"])
                 elif p["is_playlist"] and (p["playlist_items"]
                                            or p["playlist_limit"] != 1):
                     paths = core.download_playlist(
@@ -900,7 +902,8 @@ class VideoPanel(TFrame):
                         progress=on_progress, entry_progress=on_entry,
                         cancel_event=cancel_event, pause_event=pause_event,
                         subtitles=p["subtitles"], subtitle_langs=p["subtitle_langs"],
-                        embed=p["embed"])
+                        embed=p["embed"],
+                                               extras=p["extras"])
                 else:
                     path = core.download_video(p["url"], height=p["height"],
                                                save_dir=p["save_dir"],
@@ -909,7 +912,8 @@ class VideoPanel(TFrame):
                                                pause_event=pause_event,
                                                subtitles=p["subtitles"],
                                                subtitle_langs=p["subtitle_langs"],
-                                               embed=p["embed"])
+                                               embed=p["embed"],
+                                               extras=p["extras"])
             except core.DownloadCancelled:
                 self.after(0, self._download_cancelled)
             except core.DownloadPaused as exc:

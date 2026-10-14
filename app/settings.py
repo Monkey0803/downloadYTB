@@ -48,6 +48,15 @@ DEFAULTS = {
     "update_available": "",
     # 每个帖子单独建子文件夹（默认关闭：开了会改变既有目录结构）
     "group_by_post": False,
+    # 章节切分：仅当视频本身带章节时才有意义（默认关）
+    "split_chapters": False,
+    # SponsorBlock：off / mark（把标记写成章节）/ remove（把片段剪掉）
+    "sponsorblock": "off",
+    # SponsorBlock 分类：逗号分隔；空 = 内置的九种段落分类
+    "sponsorblock_categories": "",
+    # 下载限速（KB/s，0 = 不限）与分片并发（1 = yt-dlp 默认串行）
+    "ratelimit_kb": 0,
+    "fragment_workers": 1,
     "queue_autostart": True,    # 上次的窗口尺寸/位置，如 "1020x745+120+80"
     "app_logo": "classic",    # 应用图标：classic / neon / sunset / mint
 }
