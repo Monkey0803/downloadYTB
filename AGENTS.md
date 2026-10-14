@@ -3,7 +3,7 @@
 ## Project Structure
 
 - `main.py` is the application entry point.
-- `app/` contains the Tkinter UI (`gui.py`, `widgets.py`), download engines (`core.py`, `images.py`), settings, themes, localization, and macOS menubar integration. Pure helpers that used to live in `gui.py` now sit in `urlutil.py` (links, platform labels, folder names), `fspath.py` (asset paths, opening files), `dialogs.py` (the four pop-ups) and `settings_io.py` (settings import/export); the download panels live in `panels.py` and taskbar-on/off wrappers in `taskbar.py`. `gui.py` re-imports those names so `gui.parse_links`-style call sites keep working, and it is now roughly half its former size.
+- `app/` contains the Tkinter UI (`gui.py`, `widgets.py`), download engines (`core.py`, `images.py`), settings, themes, localization, and macOS menubar integration. Pure helpers that used to live in `gui.py` now sit in `urlutil.py` (links, platform labels, folder names), `fspath.py` (asset paths, opening files), `dialogs.py` (the four pop-ups) and `settings_io.py` (settings import/export); the download panels live in `panels.py`, the platform/queue/history pages in `pages.py`, and taskbar-on/off wrappers in `taskbar.py`. `gui.py` re-imports those names so `gui.parse_links`-style call sites keep working, and it is now roughly half its former size.
 - `assets/` stores icons and logo variants.
 - `test_*.py` contains focused unit, GUI, packaging, and live-network checks.
 - `build/` contains the macOS and Windows PyInstaller scripts, plus
@@ -61,14 +61,16 @@ GUI scripts such as `test_smoke_ui.py` require Tk; `test_core.py`, `test_images.
 ## Where The Code Lives (And Where Tests Must Stub It)
 
 `gui.py` was split (ROADMAP item 13) by moving whole units out and re-importing their names:
-`urlutil.py`, `fspath.py`, `dialogs.py`, `panels.py`, plus helpers into `widgets.py`/`taskbar.py`.
+`urlutil.py`, `fspath.py`, `dialogs.py`, `panels.py`, `pages.py`, plus helpers into `widgets.py`/`taskbar.py`.
 A re-imported name is the **same object**, so `gui.parse_links` or `gui.EntryPicker` still resolve —
 but a test that *stubs* a module-level name must stub it in the module that **calls** it:
 
-- `gui.open_path` / `gui.open_in_file_manager` patches still work for the main window, the pages and
-  the menubar (their code stayed in `gui.py`), while panel behaviour must be stubbed on
-  `panels.open_path` (the panels call the copy they imported). `test_history.py`'s
-  `PanelHistoryWiringTests` and `test_queue.py` show both forms side by side.
+- `gui.open_path` / `gui.open_in_file_manager` patches still work for the main window and the
+  menubar; the **pages** are stubbed on `pages.open_path` (`HistoryPageTests`) and the **panels** on
+  `panels.open_path` (`PanelHistoryWiringTests`) — three modules, three stub targets, one shared
+  helper. `test_history.py` shows two of them side by side.
+- `gui.messagebox` is different: it *is* the `tkinter.messagebox` module object, so
+  `gui.messagebox.showinfo = …` mutates the module every importer sees and keeps working.
 - The same rule hit `gui.EntryPicker`: `_open_entry_picker()` is a **panel** method, so stubbing
   `gui.EntryPicker` no longer intercepted the call, a **real modal dialog** opened, and
   `test_video_panel.py` hung instead of failing. Stub `panels.EntryPicker`.

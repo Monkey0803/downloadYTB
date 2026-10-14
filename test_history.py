@@ -14,7 +14,7 @@ import time
 import unittest
 from unittest.mock import Mock
 
-from app import gui, panels, settings as settings_mod
+from app import gui, pages, panels, settings as settings_mod
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -247,17 +247,19 @@ class HistoryPageTests(unittest.TestCase):
         self.opened = []
         self._showinfo = gui.messagebox.showinfo
         self._askyesno = gui.messagebox.askyesno
-        self._open_path = gui.open_path
-        self._reveal = gui.open_in_file_manager
+        # HistoryPage 现在住在 app/pages.py：open_path / open_in_file_manager 要按
+        # 该模块打桩才会被拦到（messagebox 是共享模块对象，改属性仍然生效）
+        self._open_path = pages.open_path
+        self._reveal = pages.open_in_file_manager
         gui.messagebox.showinfo = lambda *a, **kw: self.saved_info.append(a)
-        gui.open_path = lambda path: self.opened.append(path)
-        gui.open_in_file_manager = lambda path: self.opened.append(("reveal", path))
+        pages.open_path = lambda path: self.opened.append(path)
+        pages.open_in_file_manager = lambda path: self.opened.append(("reveal", path))
 
     def tearDown(self):
         gui.messagebox.showinfo = self._showinfo
         gui.messagebox.askyesno = self._askyesno
-        gui.open_path = self._open_path
-        gui.open_in_file_manager = self._reveal
+        pages.open_path = self._open_path
+        pages.open_in_file_manager = self._reveal
         settings_mod.save = _ORIGINAL_SAVE
 
     def _rows(self):
