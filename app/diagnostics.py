@@ -95,6 +95,21 @@ def _ytdlp_line() -> str:
     return f"{_dependency_version('yt_dlp')} ({label})"
 
 
+def _ffprobe_line() -> str:
+    """ffprobe 是否可用（第 15 项：没有它「按章节切分」与「SponsorBlock 剪切」会失败）。
+
+    报告里必须能看到这一项：用户反馈「剪切总是失败」时，看一眼就知道是不是这个原因，
+    不必反复追问环境。
+    """
+    try:
+        from .ffmpeg_util import has_ffprobe
+    except Exception:
+        return i18n.tr("diag_unavailable")
+    if has_ffprobe():
+        return i18n.tr("diag_exists")
+    return i18n.tr("diag_ffprobe_needed")
+
+
 def _ffmpeg_line() -> str:
     try:
         from .ffmpeg_util import ffmpeg_location_for_ytdlp
@@ -161,6 +176,7 @@ def build_report(settings: dict = None, probe=None) -> str:
         i18n.tr("diag_ytdlp", value=_ytdlp_line()),
         i18n.tr("diag_gallerydl", value=_dependency_version("gallery_dl")),
         i18n.tr("diag_ffmpeg", value=_ffmpeg_line()),
+        i18n.tr("diag_ffprobe", value=_ffprobe_line()),
         i18n.tr("diag_save_dir", value=_save_dir_line(settings)),
         i18n.tr("diag_log_path", value=_log_line()),
         i18n.tr("diag_proxy", value=_proxy_line()),

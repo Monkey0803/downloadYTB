@@ -363,6 +363,13 @@ T = {
     "diag_ytdlp": {"zh_CN": "- yt-dlp: {value}", "zh_TW": "- yt-dlp: {value}", "en": "- yt-dlp: {value}", "ko": "- yt-dlp: {value}", "ja": "- yt-dlp: {value}"},
     "diag_gallerydl": {"zh_CN": "- gallery-dl: {value}", "zh_TW": "- gallery-dl: {value}", "en": "- gallery-dl: {value}", "ko": "- gallery-dl: {value}", "ja": "- gallery-dl: {value}"},
     "diag_ffmpeg": {"zh_CN": "- ffmpeg: {value}", "zh_TW": "- ffmpeg: {value}", "en": "- ffmpeg: {value}", "ko": "- ffmpeg: {value}", "ja": "- ffmpeg: {value}"},
+    "diag_ffprobe": {"zh_CN": "- ffprobe: {value}", "zh_TW": "- ffprobe: {value}", "en": "- ffprobe: {value}", "ko": "- ffprobe: {value}", "ja": "- ffprobe: {value}"},
+    "diag_ffprobe_needed": {
+        "zh_CN": "不可用（按章节切分与 SponsorBlock 剪切需要它）",
+        "zh_TW": "不可用（依章節切分與 SponsorBlock 剪裁需要它）",
+        "en": "unavailable (chapter splitting and SponsorBlock cutting need it)",
+        "ko": "사용 불가 (챕터 분할과 SponsorBlock 자르기에 필요)",
+        "ja": "利用不可（チャプター分割と SponsorBlock の切り取りに必要）"},
     "diag_save_dir": {"zh_CN": "- 保存目录: {value}", "zh_TW": "- 儲存目錄: {value}", "en": "- Save directory: {value}", "ko": "- 저장 폴더: {value}", "ja": "- 保存先: {value}"},
     "diag_cookie_source": {"zh_CN": "- Cookie 来源: {source}", "zh_TW": "- Cookie 來源: {source}", "en": "- Cookie source: {source}", "ko": "- 쿠키 출처: {source}", "ja": "- Cookie の取得元: {source}"},
     "diag_cookie_status": {"zh_CN": "- Cookie 状态: {status}", "zh_TW": "- Cookie 狀態: {status}", "en": "- Cookie status: {status}", "ko": "- 쿠키 상태: {status}", "ja": "- Cookie の状態: {status}"},

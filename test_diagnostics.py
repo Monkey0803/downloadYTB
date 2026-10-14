@@ -6,7 +6,7 @@
 
 import os
 
-from app import browser_cookies, diagnostics
+from app import i18n, browser_cookies, diagnostics
 
 HOME = os.path.expanduser("~")
 
@@ -78,9 +78,30 @@ def test_last_error_round_trip():
     assert "最近一次错误: 无" in _report()
 
 
+def test_report_shows_the_ffprobe_state():
+    """报告里必须能看到 ffprobe：用户说「剪切总失败」时这是第一诊断项。"""
+    from unittest import mock
+
+    from app import ffmpeg_util
+
+    def ffprobe_line():
+        lines = [line for line in _report().splitlines()
+                 if line.startswith("- ffprobe:")]
+        assert len(lines) == 1, f"应当恰好一行 ffprobe，实际 {len(lines)}"
+        return lines[0]
+
+    with mock.patch.object(ffmpeg_util, "has_ffprobe", lambda: True):
+        assert i18n.tr("diag_exists") in ffprobe_line()
+    with mock.patch.object(ffmpeg_util, "has_ffprobe", lambda: False):
+        line = ffprobe_line()
+        assert i18n.tr("diag_ffprobe_needed") in line
+        assert "ffprobe" in line
+
+
 if __name__ == "__main__":
     test_report_contains_environment_facts()
     test_report_does_not_leak_personal_paths()
+    test_report_shows_the_ffprobe_state()
     test_report_includes_cookie_failure_detail_but_sanitized()
     test_report_reports_cookie_source_kinds()
     test_last_error_round_trip()
