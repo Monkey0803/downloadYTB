@@ -79,7 +79,7 @@ class MenuBarControllerTests(unittest.TestCase):
         cases = (("clipboardLink_", "clipboard"), ("openLastFolder_", "last_folder"),
                  ("showHistory_", "history"), ("showSettings_", "settings"),
                  ("showWindow_", "show"), ("quitApp_", "quit"),
-                 ("openRelease_", "open_release"))
+                 ("openRelease_", "version"))
         for method, expected in cases:
             self.controller.pending = None
             getattr(self.delegate, method)(None)

@@ -23,7 +23,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from . import (applog, appupdate, browser_cookies, core, diagnostics, i18n, images,
+from . import (about, applog, appupdate, browser_cookies, core, diagnostics, i18n, images,
                menubar, netproxy, postaction,
                ytdlp_update,
                platforms, settings, taskbar, theme, windowing)
@@ -2911,6 +2911,10 @@ class SettingsPage(TFrame):
                                   command=self._open_log, font=f.f_btn, width=110,
                                   bg_role="CARD")
         self.log_btn.pack(side="left", padx=(8, 0))
+        self.about_btn = PillButton(diag_row, i18n.tr("about_button"),
+                                    command=self._open_about, font=f.f_btn,
+                                    width=90, bg_role="CARD")
+        self.about_btn.pack(side="left", padx=(8, 0))
         self.diag_status = TLabel(diag_row, text="", font=f.f_small,
                                   bg_role="CARD", fg_role="TEXT_SUB")
         self.diag_status.pack(side="left", padx=(10, 0))
@@ -3241,6 +3245,10 @@ class SettingsPage(TFrame):
         self.app.settings["after_download"] = value
         settings.save(self.app.settings)
         applog.log_event("after_download_setting", action=value)
+
+    def _open_about(self):
+        """集中入口：版本、依赖、保存位置、日志路径都在这里看。"""
+        about.show(self.app, probe=getattr(self, "_cookie_probe", None))
 
     def _open_log(self):
         """在文件管理器里定位日志文件；还没有日志就先写一行把它建出来。"""
@@ -4409,6 +4417,10 @@ class App(tk.Tk):
         req = self.menubar.take_pending()
         # 先续期轮询：若后续 quit 销毁了窗口，未触发的定时器随解释器终止
         self.after(150, self._poll_menubar)
+        self._handle_menubar_action(req)
+
+    def _handle_menubar_action(self, req):
+        """执行一个菜单动作（拆出来是为了能直接驱动，尤其是版本项的双行为）。"""
         if req == "show":
             self.show_main_window()
         elif req == "quit":
@@ -4423,8 +4435,13 @@ class App(tk.Tk):
         elif req == "settings":
             self.show_main_window()
             self.show_page("settings")
-        elif req == "open_release":
-            open_path(getattr(self, "_release_url", "") or appupdate.RELEASES_PAGE)
+        elif req == "version":
+            # 菜单项标题就说明了它会做什么：有新版打开发布页，否则打开「关于」
+            if str(self.settings.get("update_available") or ""):
+                open_path(getattr(self, "_release_url", "") or appupdate.RELEASES_PAGE)
+            else:
+                about.show(self, probe=getattr(self.pages.get("settings"),
+                                               "_cookie_probe", None))
 
     def _on_close_window(self):
         """关闭窗口（红色按钮）→ 隐藏窗口，应用保留在 menubar 运行。"""

@@ -86,7 +86,7 @@ if _AVAILABLE:
 
         def openRelease_(self, sender):
             NSApp.activateIgnoringOtherApps_(True)
-            self.controller.pending = "open_release"
+            self.controller.pending = "version"
 
         # —— NSMenuDelegate：菜单即将弹出时刷新状态文案 ——
 
