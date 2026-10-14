@@ -31,7 +31,7 @@
 | 11 | 没有关于对话框（版本、依赖、日志路径、一键复制报告） | 无 About 相关代码；诊断报告已存在但没有集中入口 | 2 | 4 | 2 | 4.0 | ✅ 已完成：新增 `app/about.py`（原样展示诊断报告 + 复制/打开日志/发布页），设置页与菜单栏版本项两个入口 |
 | 12 | 无设置导入/导出，换机迁移要手抄 | `settings.json` 只有本地读写 | 2 | 4 | 2 | 4.0 | ✅ 已完成：新增 `app/settings_io.py`（只认已有键、类型与取值校验、排除敏感/机器相关），设置页「设置导入导出」卡片，导入后立刻应用 |
 | 13 | `app/gui.py` 单文件 4,066 行（占全项目 42%），每次改动都落在同一文件 | `wc -l app/gui.py` = 4066 / 9660 | 3 | 5 | 4 | 3.8 | ✅ 已完成：拆成 `urlutil.py` / `fspath.py`（纯工具）、`dialogs.py`（弹窗）、`panels.py`（下载面板）、`pages.py`（平台/队列/历史页）、`settingspage.py`（设置页，1221 行），共用辅助归入 `widgets.py` / `taskbar.py`。gui.py 4851 → 1127 行（只剩 App 与 run）；全程 39 个离线测试文件保持通过 |
-| 14 | Windows 无安装包、Linux 无 `.desktop`/AppImage | CI 只产出 zip（`.github/workflows/release.yml`） | 2 | 4 | 3 | 2.7 | 待办 |
+| 14 | Windows 无安装包、Linux 无 `.desktop`/AppImage | CI 只产出 zip（`.github/workflows/release.yml`） | 2 | 4 | 3 | 2.7 | ✅ 已完成（AppImage 未做）：Linux 包自带 `videodownloader.desktop` + `install-desktop.sh`（`build/desktop_entry.py` 生成，文件名与 taskbar 的 launcher id 对齐）；Windows 由 Inno Setup 出 per-user 安装包，CI 编译并作为资产上传 |
 | 15 | 小众能力：章节分割、SponsorBlock、限速、分片并发 | 引擎选项中均无 | 2 | 3 | 3 | 2.0 | 待办 |
 
 ## 只有维护者能做的验证

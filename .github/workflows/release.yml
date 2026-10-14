@@ -71,10 +71,27 @@ jobs:
       - name: Package release asset
         shell: pwsh
         run: Compress-Archive -Path dist\VideoDownloader -DestinationPath "dist\VideoDownloader-$env:RELEASE_TAG-windows-x64.zip"
+      # 安装包（Inno Setup）：脚本在 build/windows_installer.iss。
+      # 这里不做 continue-on-error——安装包是本版的发布契约之一，编不出来就该整版失败，
+      # 而不是安静地少发一个文件（.iss 里的界面文案保持 ASCII，正是为了压低这个风险）。
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "$env:RELEASE_TAG".TrimStart("v")
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          if (-not (Test-Path $iscc)) { throw "找不到 ISCC.exe，Inno Setup 未安装成功" }
+          & $iscc "/DAppVersion=$version" "build\windows_installer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 编译失败（退出码 $LASTEXITCODE）" }
+          # 统一资产命名：与另外两个平台的 -<tag>-<platform> 对齐（ISCC 用的是去掉 v 的版本号）
+          Move-Item "dist\VideoDownloader-$version-windows-x64-setup.exe" `
+                    "dist\VideoDownloader-$env:RELEASE_TAG-windows-x64-setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows-x64
-          path: dist/VideoDownloader-${{ env.RELEASE_TAG }}-windows-x64.zip
+          path: |
+            dist/VideoDownloader-${{ env.RELEASE_TAG }}-windows-x64.zip
+            dist/VideoDownloader-${{ env.RELEASE_TAG }}-windows-x64-setup.exe
           if-no-files-found: error
 
   build-linux:
@@ -150,4 +167,6 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TAG" --notes-file release-notes.md
           fi
-          gh release upload "$RELEASE_TAG" release-assets/*.zip --repo "$GITHUB_REPOSITORY" --clobber
+          # 上传目录里的全部资产（zip 与 windows 的 setup.exe），逐个列举的话
+          # 某个平台少产出一种文件就会让上传直接失败
+          gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber

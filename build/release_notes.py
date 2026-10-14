@@ -58,8 +58,8 @@ INSTALL_SECTION = """## 安装 / Installation
 | 平台 | 首次打开被拦住时怎么做 |
 | --- | --- |
 | macOS | 在「应用程序」里**右键点图标 → 打开**，再点一次「打开」；或执行 `xattr -dr com.apple.quarantine /Applications/VideoDownloader.app` |
-| Windows | SmartScreen 提示「Windows 已保护你的电脑」→「更多信息」→「仍要运行」 |
-| Linux | `chmod +x VideoDownloader` 后运行；桌面环境可自行创建一个 `.desktop` 启动项 |
+| Windows | 想装到系统里就下 `-setup.exe` 双击安装（每用户安装，不需要管理员）；或解压 zip 直接运行。首次打开会遇 SmartScreen：「更多信息」→「仍要运行」 |
+| Linux | 解压后先 `sh install-desktop.sh` 装好菜单启动项（已自带，可重复执行），然后 `chmod +x VideoDownloader` 运行；也可以不装，直接用命令行启动 |
 
 macOS 版本目前是 ad-hoc 签名（未做 Apple 公证），所以会出现上述提示；
 Windows 版本未做代码签名，同理。两者都不影响功能。
@@ -71,8 +71,8 @@ expected, **not** a corrupted download.
 | Platform | If the first launch is blocked |
 | --- | --- |
 | macOS | Right-click the app in Applications → **Open**, then Open again; or run `xattr -dr com.apple.quarantine /Applications/VideoDownloader.app` |
-| Windows | On the SmartScreen prompt choose **More info** → **Run anyway** |
-| Linux | `chmod +x VideoDownloader` and run it; create a `.desktop` entry if you want one |
+| Windows | Download the `-setup.exe` for a normal per-user install (no admin needed), or unzip and run directly; on the SmartScreen prompt choose **More info** → **Run anyway** |
+| Linux | Run `sh install-desktop.sh` once to add it to your application menu, then `chmod +x VideoDownloader` and run it — or skip the menu entry and launch it from a terminal |
 """
 
 # 这些 scope 对读者没有意义，不在说明里显示（本仓库的提交 scope 恒为 repo）

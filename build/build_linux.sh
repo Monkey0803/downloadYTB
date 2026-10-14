@@ -36,5 +36,12 @@ mkdir -p build/work
     --specpath build \
     main.py
 
+# 生成桌面启动项与安装脚本（ROADMAP 第 14 项）：Linux 包解压后跑一次
+# install-desktop.sh，应用就会出现在系统菜单里，任务栏也能对上图标。
+"$PYTHON" build/desktop_entry.py \
+    --dir "dist/VideoDownloader" \
+    --version "$APP_VERSION" \
+    --icon "assets/logos/classic_512.png"
+
 echo
 echo "打包完成：dist/VideoDownloader/VideoDownloader（版本 ${APP_VERSION}）"
