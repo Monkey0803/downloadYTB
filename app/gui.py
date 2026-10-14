@@ -157,7 +157,7 @@ class App(tk.Tk):
         self.set_queue_items(items)
         return True
 
-    def enqueue_urls(self, urls, kind="video"):
+    def enqueue_urls(self, urls, kind="video", platform=""):
         """批量入队，返回 (新增数, 跳过数)。
 
         跳过 = 队列里已有（**同类型**）或 本批重复。用户从聊天记录里复制时经常重复
@@ -176,7 +176,9 @@ class App(tk.Tk):
             if not url or key in existing or added >= room:
                 skipped += 1
                 continue
-            items.append({"url": url, "platform": detect_platform(url), "kind": kind})
+            items.append({"url": url,
+                          "platform": platform or detect_platform(url),
+                          "kind": kind})
             existing.add(key)
             added += 1
         if added:
@@ -670,6 +672,10 @@ class App(tk.Tk):
                 self.page_holder, self, i18n.tr("weibo_title"),
                 i18n.tr("weibo_subtitle"), platform="weibo",
                 hint=i18n.tr("weibo_hint"), show_kind_switch=False),
+            platforms.GENERIC_KEY: VideoPlatformPage(
+                self.page_holder, self, i18n.tr("generic_title"),
+                i18n.tr("generic_subtitle"),
+                platform=platforms.GENERIC_KEY, hint=i18n.tr("generic_hint")),
             "queue": QueuePage(self.page_holder, self),
             "history": HistoryPage(self.page_holder, self),
             "settings": SettingsPage(self.page_holder, self),
@@ -681,7 +687,8 @@ class App(tk.Tk):
                     ("instagram", i18n.tr("instagram_nav"), "instagram"),
                     ("douyin", i18n.tr("douyin_nav"), "douyin"),
                     ("bilibili", i18n.tr("bilibili_nav"), "bilibili"),
-                    ("weibo", i18n.tr("weibo_nav"), "weibo")]
+                    ("weibo", i18n.tr("weibo_nav"), "weibo"),
+                    (platforms.GENERIC_KEY, i18n.tr("generic_nav"), "generic")]
         for key, label, icon in nav_defs:
             item = SidebarItem(self.sidebar, label, icon,
                                command=lambda k=key: self.show_page(k),
@@ -1040,10 +1047,10 @@ class App(tk.Tk):
         self._hide_clipboard_suggestion()
         if not url:
             return
-        platform = detect_platform(url)
-        if platform in self.pages:
-            self.show_page(platform)
-            self.pages[platform].handle_url(url)
+        target = self._target_page(url)
+        if target:
+            self.show_page(target)
+            self.pages[target].handle_url(url)
             return
         # 点了一下却什么都没发生是最糟的反馈，说明白为什么不支持
         self._set_status_anywhere(self._unsupported_message(url), error=True)
@@ -1069,29 +1076,42 @@ class App(tk.Tk):
             return
         url = extract_supported_url(text)
         if not url:
-            # URL_RE 是按平台严格匹配的，不支持的链接在这里就是 None。先判断
-            # 「到底有没有链接」：有链接但不支持，要说清是哪个平台；真的没有链接，
-            # 才说「没有可识别的链接」——两者对用户是完全不同的信息。
+            # URL_RE 是按平台**严格**匹配的，不支持的链接在这里就是 None。两种情况要分开：
+            # 通用面板认得它（小红书/TikTok 这类引擎支持的站点）→ 按正常流程走；
+            # 连引擎都不支持 → 说清是哪个平台；真的没有链接 → 才说「没有可识别的链接」。
             found = parse_links(text)
-            if found and (force or action != "off"):
-                self._set_status_anywhere(self._unsupported_message(found[0]),
-                                          error=True)
+            supported = found and self._target_page(found[0])
+            if supported:
+                url = found[0]
+            else:
+                if found and (force or action != "off"):
+                    self._set_status_anywhere(self._unsupported_message(found[0]),
+                                              error=True)
+                    return
+                if force and not found:
+                    self._set_status_anywhere(i18n.tr("clipboard_no_link"), error=True)
                 return
-            if force and not found:
-                self._set_status_anywhere(i18n.tr("clipboard_no_link"), error=True)
-            return
-        platform = detect_platform(url)
-        if platform not in self.pages:
+        target = self._target_page(url)
+        if not target:
             # 已知但不支持的平台要**主动说一句**（每个剪贴板文本只说一次，
             # 靠上面 _last_clipboard 的去重，不会反复刷屏）
             self._set_status_anywhere(self._unsupported_message(url), error=True)
             return
         if force or action == "auto":
             # 保留旧行为，但改成需要用户显式选择
-            self.show_page(platform)
-            self.pages[platform].handle_url(url)
+            self.show_page(target)
+            self.pages[target].handle_url(url)
             return
         self._show_clipboard_suggestion(url)
+
+    def _target_page(self, url):
+        """链接该去哪个页面：专属面板优先，其次是通用面板；都没有则 None。"""
+        platform = detect_platform(url)
+        if platform in self.pages:
+            return platform
+        if platforms.generic_site_label_key(url):
+            return platforms.GENERIC_KEY
+        return None
 
     def _unsupported_message(self, url):
         """链接进不了任何面板时，给一句**准确**的说明。
@@ -1103,10 +1123,12 @@ class App(tk.Tk):
         if info is None:
             return i18n.tr("unsupported_link_other")
         key, engine_ok = info
-        message = i18n.tr("unsupported_platform", platform=i18n.tr(key))
         if engine_ok:
-            message += "　" + i18n.tr("unsupported_platform_engine_hint")
-        return message
+            # 引擎支持、只是没有专属面板：这种站点现在有去处了，所以**不能**说
+            # 「暂不支持」——只给可操作的指引（打包冒烟里看到的自相矛盾就是从这来的）
+            return i18n.tr("unsupported_platform_engine_hint_full",
+                           platform=i18n.tr(key))
+        return i18n.tr("unsupported_platform", platform=i18n.tr(key))
 
     def _set_status_anywhere(self, text, error=False):
         """把状态写到当前可见面板（menubar 动作发生在哪个页面并不确定）。"""

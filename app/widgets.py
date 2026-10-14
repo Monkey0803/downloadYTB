@@ -1125,6 +1125,11 @@ class SidebarItem(tk.Canvas):
                              fill="#FFFFFF", outline="")
             self.create_oval(cx - 1.5, cy - 2.5, cx + 2.5, cy + 2.5,
                              fill=red, outline="")
+        elif self._icon == "generic":
+            # 通用面板：一颗地球（表示「任何站点」）
+            self.create_oval(cx - 9, cy - 9, cx + 9, cy + 9, outline=fg, width=2)
+            self.create_line(cx - 9, cy, cx + 9, cy, fill=fg, width=1)
+            self.create_oval(cx - 4, cy - 9, cx + 4, cy + 9, outline=fg, width=1)
         elif self._icon == "queue":
             # 列表：三条横线，每行左侧一个小方点
             for offset in (-5, 0, 5):

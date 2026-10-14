@@ -39,10 +39,10 @@ def enqueue_from_entry(app, panel, kind) -> None:
         panel._set_status(i18n.tr("queue_need_link"), error=True)
         return
     if len(urls) == 1:
-        app.enqueue_url(urls[0], kind=kind)
+        app.enqueue_url(urls[0], platform=panel.platform, kind=kind)
         panel._set_status(i18n.tr("queue_added", url=urls[0]), ok=True)
         return
-    added, skipped = app.enqueue_urls(urls, kind=kind)
+    added, skipped = app.enqueue_urls(urls, kind=kind, platform=panel.platform)
     if not added:
         panel._set_status(i18n.tr("queue_all_duplicated", skipped=skipped),
                           error=True)

@@ -56,7 +56,10 @@ class PlatformIdentityTests(unittest.TestCase):
                           getattr(page, "image_panel", None)):
                 if panel is None:
                     continue
-                self.assertIn(panel.platform, platforms.PLATFORMS,
+                # 通用面板用 platforms.GENERIC_KEY：它刻意不在 PLATFORMS 里
+                #（那一组是「有专属面板」的平台，要与 PLATFORM_LABEL_KEYS 逐项对应）
+                allowed = platforms.PLATFORMS + (platforms.GENERIC_KEY,)
+                self.assertIn(panel.platform, allowed,
                               f"{key} 的面板身份 {panel.platform!r} 不是 ASCII 平台键")
                 self.assertTrue(panel.platform.isascii())
 

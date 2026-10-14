@@ -145,11 +145,18 @@ class ClipboardBehaviourTests(unittest.TestCase):
         self.assertNotIn(i18n.tr("clipboard_no_link"), text,
                          "明明有链接，不能说「没有可识别的链接」")
 
-    def test_engine_supported_platform_gets_the_hint(self):
-        """小红书/TikTok 的提取器 yt-dlp 自带，只是界面没做，提示要如实。"""
+    def test_engine_supported_platform_is_offered_through_the_generic_page(self):
+        """小红书/TikTok 的提取器 yt-dlp 自带——现在有「其他站点」页了，就该直接收下。
+
+        这条以前断言的是「提示里附带『引擎支持、界面还没做』」，通用面板上线后
+        那句提示不再出现（有去处了），改成断言「给出建议条而不是报错」。
+        """
         self._feed_clipboard(self.TIKTOK)
-        self.assertIn(i18n.tr("unsupported_platform_engine_hint"),
-                      self._status_text())
+        self.assertEqual(self.app._clipboard_suggestion, self.TIKTOK,
+                         "引擎支持的站点应当给出填入建议")
+        self.assertNotIn(i18n.tr("unsupported_platform_engine_hint"),
+                         self._status_text(),
+                         "有去处了就不该再报「暂不支持」")
 
     def test_engine_unsupported_platform_has_no_hint(self):
         self._feed_clipboard(self.WECHAT)

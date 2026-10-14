@@ -46,7 +46,7 @@ Use Python 3 style, four-space indentation, descriptive `snake_case` functions a
 ## Testing Guidelines
 
 Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local changes. The offline suite is `test_i18n.py`, `test_save_dir_sync.py`, `test_weibo.py`, `test_browser_cookies.py`, `test_audio_options.py`, `test_windowing.py`, `test_diagnostics.py`, `test_shortcuts.py`, `test_platforms.py`, `test_dock.py`, `test_video_options.py`, `test_image_skip.py`, `test_video_panel.py`, `test_playlist.py`, `test_taskbar.py`, `test_taskbar_kde.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`,
-`test_release_notes.py`, `test_installers.py`, `test_chapters.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, `test_menubar.py`, `test_contrast.py`, `test_font_scale.py`, `test_queue.py`, `test_platform_identity.py`, `test_post_folder.py`, `test_ytdlp_update.py`, `test_logging.py`, `test_thumbnails.py`, `test_proxy.py`, `test_appupdate.py`, `test_after_download.py`, `test_embed.py`, `test_about.py`, and `test_settings_io.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
+`test_release_notes.py`, `test_installers.py`, `test_chapters.py`, `test_generic.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, `test_menubar.py`, `test_contrast.py`, `test_font_scale.py`, `test_queue.py`, `test_platform_identity.py`, `test_post_folder.py`, `test_ytdlp_update.py`, `test_logging.py`, `test_thumbnails.py`, `test_proxy.py`, `test_appupdate.py`, `test_after_download.py`, `test_embed.py`, `test_about.py`, and `test_settings_io.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
 hops back with `self.app.after(0, callback)`. That hop **requires a running
 `mainloop()`** — Tk raises `RuntimeError: main thread is not in main loop` when a
 non-main thread calls `after` while the main thread is only pumping `update()`, so a test
@@ -274,6 +274,31 @@ Three settings (`embed_subtitles`, `embed_thumbnail`, `embed_metadata`, all off)
 - `mutagen` is required for mp3/m4a cover embedding and is **not** a yt-dlp dependency, so it is in
   `requirements.txt` and each build script passes `--hidden-import mutagen` (yt-dlp imports it
   lazily, so PyInstaller would otherwise drop it).
+
+## The Generic Panel
+
+Not every site yt-dlp supports deserves its own panel, so there is one "Other sites" page
+(`platforms.GENERIC_KEY`) hosting a plain `VideoPlatformPage`. It exists to delete a dead end: the
+clipboard used to answer a Xiaohongshu/TikTok link with 「引擎本身支持，界面上还没做」.
+
+- **`GENERIC_KEY` is deliberately not in `platforms.PLATFORMS`.** That tuple is "platforms with a
+  panel" and is zipped with `PLATFORM_LABEL_KEYS` for the per-platform cookie rows; adding a seventh
+  entry would shift that mapping. The key therefore has its own label branch in
+  `urlutil.platform_label()` and its own entry in `test_platform_identity.py`'s allowed list.
+- **Routing lives in `App._target_page(url)`**: a dedicated panel first, then the generic page, else
+  `None`. Both clipboard paths (the suggestion strip and the menu-bar paste) and the queue go through
+  it. The subtlety that broke the first version: `extract_supported_url()` uses the **strict**
+  per-platform regex, so a TikTok link is `None` there and the code fell into the "unsupported"
+  branch **before** routing was ever consulted — the fallback must run right after `parse_links()`.
+- **`unsupported_site()`'s engine flag now decides routing, not wording**: engine-supported sites go
+  to the generic page, the rest (WeChat Channels/articles, Kuaishou) keep the clear "not supported"
+  message. `platforms.generic_site_label_key()` is that test.
+- The panel itself is untouched `VideoPanel`: it only compares `self.platform` against `"weibo"` /
+  `"youtube"`, so a new key flows through. `on_probe()` does **not** validate against `URL_RE` — the
+  engine decides.
+- Enqueuing from a panel now passes `platform=panel.platform`. Without it the queue stored
+  `detect_platform(url)` = `None` for a generic link, and `advance_queue()` could not find a page to
+  put the job back into.
 
 ## Chapters, SponsorBlock And Rate Limit
 

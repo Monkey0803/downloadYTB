@@ -114,6 +114,10 @@ def platform_label(platform: str) -> str:
     覆盖、保存目录键一致），显示时才翻成当前语言的标签。
     """
     key = str(platform or "").strip().lower()
+    if key == platforms.GENERIC_KEY:
+        # 通用页不在 PLATFORMS 里（那一组要和 PLATFORM_LABEL_KEYS 逐项对应），
+        # 所以单独给一个显示名，历史与队列行才不会显示裸的 "generic"
+        return i18n.tr("generic_label")
     labels = dict(zip(platforms.PLATFORMS, PLATFORM_LABEL_KEYS))
     label_key = labels.get(key)
     return i18n.tr(label_key) if label_key else str(platform or "")
