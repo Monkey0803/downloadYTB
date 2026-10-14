@@ -23,6 +23,7 @@ A desktop downloader built with Python, Tkinter, yt-dlp, and gallery-dl. It supp
 - Keyboard operable: Tab moves between buttons, checkboxes, dropdowns and the sidebar; Return/Space activates, arrow keys switch segmented controls.
 - Key events are written to a local log (Settings → Advanced → Diagnostics → Open log), so a failure survives a restart; the log rotates at 1 MB and keeps three files.
 - Settings → Advanced → **Network proxy** takes an address such as `http://127.0.0.1:7890` and applies it to yt-dlp, gallery-dl and image downloads; leave it empty to connect directly (the `HTTP(S)_PROXY` environment variables are picked up automatically).
+- Settings → Advanced → **Import / export settings** writes your appearance, save-location and download/embedding preferences to a JSON file you can import on another machine (cookie paths, the proxy URL, history and queue are excluded for safety).
 - Settings → Advanced → **Diagnostics → About** shows the version, dependencies, save location and log path in one place, with one-click copy of the diagnostics report; the menu bar version item opens it too.
 - Settings → Download → **Embed in the file** can put subtitles into the video, save and embed the cover, and write metadata such as the title (all off by default; turning them on changes the produced files).
 - Settings → Download → **After download** can open the folder, open the file, quit the app or sleep the computer once **everything has finished** (off by default; sleeping is safer than shutting down, which cannot be undone).

@@ -24,7 +24,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 from . import (about, applog, appupdate, browser_cookies, core, diagnostics, i18n, images,
-               menubar, netproxy, postaction,
+               menubar, netproxy, postaction, settings_io,
                ytdlp_update,
                platforms, settings, taskbar, theme, windowing)
 from .widgets import (
@@ -2954,6 +2954,27 @@ class SettingsPage(TFrame):
         _pack_wrapped_hint(bv, app, i18n.tr("update_hint"), bg_role="CARD",
                            pady=(8, 0))
         self._track_card("version", card_ver, bv)
+
+        # —— 设置导入导出 ——
+        card_io = GlassCard(self._scroll_body)
+        card_io.set_height(160)
+        card_io.pack(fill="x", pady=(0, 12))
+        bio = card_io.body
+        TLabel(bio, text=i18n.tr("settings_io_card"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        io_row = TFrame(bio, bg_role="CARD")
+        io_row.pack(anchor="w", pady=(10, 0))
+        self.export_btn = PillButton(io_row, i18n.tr("settings_export"),
+                                     command=self._export_settings, font=f.f_btn,
+                                     width=110, bg_role="CARD")
+        self.export_btn.pack(side="left")
+        self.import_btn = PillButton(io_row, i18n.tr("settings_import"),
+                                     command=self._import_settings, font=f.f_btn,
+                                     width=110, bg_role="CARD")
+        self.import_btn.pack(side="left", padx=(8, 0))
+        _pack_wrapped_hint(bio, app, i18n.tr("settings_io_hint"), bg_role="CARD",
+                           pady=(10, 0))
+        self._track_card("settings_io", card_io, bio)
         self._refresh_version_status()
 
         self._bind_scroll_events()
@@ -3245,6 +3266,75 @@ class SettingsPage(TFrame):
         self.app.settings["after_download"] = value
         settings.save(self.app.settings)
         applog.log_event("after_download_setting", action=value)
+
+    def _export_settings(self):
+        """把用户偏好导出成 JSON 文件。"""
+        path = filedialog.asksaveasfilename(
+            title=i18n.tr("settings_export"), parent=self.app,
+            defaultextension=".json",
+            initialfile="videodownloader-settings.json",
+            filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        try:
+            settings_io.write_file(path, settings_io.exportable(self.app.settings))
+        except OSError as exc:
+            applog.log_event("settings_export_failed", error=str(exc)[:200])
+            messagebox.showerror(
+                i18n.tr("settings_io_card"),
+                i18n.tr("settings_export_failed", message=str(exc)[:200]),
+                parent=self.app)
+            return
+        applog.log_event("settings_exported", path=path)
+        messagebox.showinfo(i18n.tr("settings_io_card"),
+                            i18n.tr("settings_export_done", path=path),
+                            parent=self.app)
+
+    def _import_settings(self):
+        """从 JSON 文件导入设置，并立刻应用到当前进程。"""
+        path = filedialog.askopenfilename(
+            title=i18n.tr("settings_import"), parent=self.app,
+            filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        try:
+            data = settings_io.read_file(path)
+            merged, summary = settings_io.import_settings(data, self.app.settings)
+        except settings_io.SettingsImportError as exc:
+            applog.log_event("settings_import_failed", error=str(exc)[:200])
+            messagebox.showerror(
+                i18n.tr("settings_io_card"),
+                i18n.tr("settings_import_failed", message=str(exc)[:200]),
+                parent=self.app)
+            return
+        if not merged:
+            messagebox.showinfo(i18n.tr("settings_io_card"),
+                                i18n.tr("settings_import_nothing"),
+                                parent=self.app)
+            return
+        self.app.settings.update(merged)
+        settings.save(self.app.settings)
+        applog.log_event("settings_imported", applied=summary["applied"],
+                         ignored=summary["ignored"])
+        messagebox.showinfo(
+            i18n.tr("settings_io_card"),
+            i18n.tr("settings_import_done", applied=summary["applied"],
+                    ignored=summary["ignored"]),
+            parent=self.app)
+        self._apply_imported_settings()
+
+    def _apply_imported_settings(self):
+        """把导入的设置应用到当前进程。
+
+        顺序要紧：``set_font_scale`` 会**销毁并重建**整个布局（本页控件随之作废），
+        所以放在最后，之后不再碰任何控件。
+        """
+        try:
+            self.app.set_theme(self.app.settings.get("theme", "system"))
+            self.app.set_language(self.app.settings.get("language", i18n.language()))
+            self.app.set_font_scale(self.app.settings.get("font_scale", "standard"))
+        except tk.TclError:
+            pass
 
     def _open_about(self):
         """集中入口：版本、依赖、保存位置、日志路径都在这里看。"""
