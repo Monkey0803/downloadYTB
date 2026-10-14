@@ -13,7 +13,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import Mock
 
-from app import gui, i18n, settings as settings_mod
+from app import gui, i18n, panels, settings as settings_mod
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -346,13 +346,15 @@ class QueuePanelTests(unittest.TestCase):
     def test_each_panel_enqueues_with_its_own_kind(self):
         page = self.app.pages["weibo"]
         kinds = []
-        original = gui.enqueue_from_entry
-        gui.enqueue_from_entry = lambda app, panel, kind: kinds.append(kind)
+        # 面板代码现在住在 app/panels.py，调用的也是该模块里的 enqueue_from_entry，
+        # 所以打桩要落在 panels 上（gui.enqueue_from_entry 只是同名再导出）
+        original = panels.enqueue_from_entry
+        panels.enqueue_from_entry = lambda app, panel, kind: kinds.append(kind)
         try:
             page.image_panel.on_enqueue()
             page.video_panel.on_enqueue()
         finally:
-            gui.enqueue_from_entry = original
+            panels.enqueue_from_entry = original
         self.assertEqual(kinds, ["image", "video"])
 
     def test_image_panel_enqueue_adds_an_image_job(self):

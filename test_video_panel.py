@@ -9,7 +9,7 @@ import time
 import unittest
 from unittest.mock import Mock
 
-from app import core, gui, i18n, settings as settings_mod
+from app import core, gui, i18n, panels, settings as settings_mod
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -577,8 +577,10 @@ class PlaylistLoadMoreTests(unittest.TestCase):
             def show(self):
                 return None
 
-        original = gui.EntryPicker
-        gui.EntryPicker = FakePicker
+        # _open_entry_picker 是面板方法，代码住在 app/panels.py：打桩落在 panels 上，
+        # 否则补丁拦不住，会弹出真实模态框把测试卡住（本文件曾因此挂起）
+        original = panels.EntryPicker
+        panels.EntryPicker = FakePicker
         try:
             self.panel._info = Mock(playlist_count=250, playlist_truncated=True,
                                     warning="")
@@ -587,7 +589,7 @@ class PlaylistLoadMoreTests(unittest.TestCase):
             self.panel._playlist_items = [2]
             self.panel._open_entry_picker()
         finally:
-            gui.EntryPicker = original
+            panels.EntryPicker = original
         self.assertEqual(captured["titles"], ["第一集", "第二集"])
         self.assertEqual(captured["selected"], [2])
         self.assertTrue(captured["truncated"])

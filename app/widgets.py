@@ -1183,3 +1183,16 @@ def _check_pill_width(font, text, extra=44):
     except Exception:
         return 300
     return max(120, measured + extra)  # extra = 复选框 18px + 左右内边距
+
+
+def _segmented_width(font, labels, margin=18):
+    """SegmentedControl 把总宽平分给每段，必须保证最长的一段也放得下。
+
+    写死宽度在英文下会截断（"Video (with audio)" 曾显示成 "/ideo (with audio)"）。
+    """
+    labels = list(labels)
+    try:
+        widest = max(font.measure(label) for label in labels)
+    except Exception:
+        return 260
+    return int(widest + margin) * len(labels) + 6

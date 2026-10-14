@@ -107,3 +107,23 @@ def reset_backend():
     global _backend, _backend_key
     _backend = None
     _backend_key = None
+
+
+# 按用户开关决定是否写任务栏的应用层薄包装：面板与主窗口共用，避免到处重复判断
+# dock_status_enabled()。测试里仍以 gui._taskbar_progress 打桩（gui 会重新导出）。
+def _taskbar_progress(app, percent):
+    """下载进度写入 Dock 角标 / Windows 任务栏进度（用户开关打开时）。"""
+    if app.dock_status_enabled():
+        set_progress(percent, window=app)
+
+
+def _taskbar_done(app):
+    """完成提示：角标 ✓ / 弹跳，或在任务栏闪烁提示。"""
+    if app.dock_status_enabled():
+        set_done(window=app)
+
+
+def _taskbar_clear(app):
+    """清除 Dock 角标 / 任务栏进度。"""
+    if app.dock_status_enabled():
+        clear(window=app)

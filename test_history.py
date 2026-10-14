@@ -14,7 +14,7 @@ import time
 import unittest
 from unittest.mock import Mock
 
-from app import gui, settings as settings_mod
+from app import gui, panels, settings as settings_mod
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -356,11 +356,13 @@ class PanelHistoryWiringTests(unittest.TestCase):
         self.video = self.app.pages["youtube"].video_panel
         self.image = self.app.pages["weibo"].image_panel
         self.opened = []
-        self._open_path = gui.open_path
-        gui.open_path = lambda path: self.opened.append(path)
+        # 面板代码现在住在 app/panels.py，调用的是该模块里导入的 open_path，
+        # 所以面板相关的打桩要落在 panels 上（gui.open_path 只影响主窗口/页面代码）
+        self._open_path = panels.open_path
+        panels.open_path = lambda path: self.opened.append(path)
 
     def tearDown(self):
-        gui.open_path = self._open_path
+        panels.open_path = self._open_path
         settings_mod.save = _ORIGINAL_SAVE
 
     def test_video_panel_records_history_on_completion(self):
