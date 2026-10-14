@@ -183,6 +183,11 @@ Four details:
   report can arrive after the user closed the window.
 - Entry points: the settings card's About button, and the **menu-bar version item** — which has two
   behaviours keyed on its own label (no update → About; update found → the releases page).
+- **Sizing**: a `Toplevel` must be given a minimum width and its **position only**
+  (`geometry("+x+y")`) — the first version set `geometry("660+x+y")`, which pinned the size, so long
+  paths (the ffmpeg path, a cookie error) ran past the right edge and the bottom button row was cut
+  off. No unit test can see that; only a screenshot did. `_fill()` calls `update_idletasks()` so the
+  window grows once the report arrives, and the check is `winfo_height() >= winfo_reqheight()`.
 - `App._handle_menubar_action()` was extracted out of `_poll_menubar()` so a test can drive a menu
   action directly instead of faking the poll loop; the two-behaviour version item is exactly the
   kind of logic that needs it.

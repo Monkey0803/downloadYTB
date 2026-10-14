@@ -72,14 +72,18 @@ class AboutDialog(tk.Toplevel):
                    font=app.f_btn, width=90, bg_role="BG").pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self.destroy)
+        # 只给最小宽度，高度让内容自己撑开：第一版用 geometry("660+x+y") 定死尺寸，
+        # 结果长路径把文字顶出右边界、底部两个按钮被裁掉（截图才看出来）
+        self.minsize(self.WIDTH, 1)
         self._center_on(master)
         self._collect()
 
     def _center_on(self, master):
+        """只设位置，尺寸交给内容（见上面 minsize 处的说明）。"""
         try:
             self.update_idletasks()
             x = master.winfo_rootx() + max(20, (master.winfo_width() - self.WIDTH) // 2)
-            self.geometry(f"{self.WIDTH}+{max(0, x)}+100")
+            self.geometry(f"+{max(0, x)}+100")
         except tk.TclError:
             pass
 
@@ -107,6 +111,7 @@ class AboutDialog(tk.Toplevel):
             return
         self.report = report
         self.body_label.configure(text=report)
+        self.update_idletasks()          # 内容变高后让窗口跟着长
 
     def _copy(self):
         if not self.report:
