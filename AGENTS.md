@@ -137,6 +137,16 @@ maps anything non-ASCII to `unknown` — the keys it returns are persisted in us
 `test_platform_identity.py` guards all of it, and because the whitelist is gone the
 hardcoded-text check in `test_i18n.py` now flags a display name reintroduced as an identifier.
 
+Links from platforms the app has no panel for must be **named, not silently dropped**
+(`platforms.unsupported_site()` + `gui._unsupported_message()`): copying a WeChat Channels link
+used to produce no reaction at all, and the menu-bar paste path even claimed "no link in the
+clipboard". Two details: the message distinguishes *the engine also cannot do it* (WeChat
+Channels / WeChat articles / Kuaishou) from *yt-dlp supports it but the UI does not yet*
+(Xiaohongshu / TikTok — verified against `yt-dlp --list-extractors`), and host matching is
+boundary-safe so `notweixin.qq.com` is not treated as WeChat. Note that `extract_supported_url()`
+uses the strict per-platform `URL_RE`, so an unsupported link returns `None` there — the clipboard
+path falls back to `parse_links()` to tell "a link we cannot handle" apart from "no link at all".
+
 ## Download Queue
 
 The queue stores **only a URL, a platform key and the kind** (`video`/`image`) — deliberately

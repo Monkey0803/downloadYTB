@@ -126,6 +126,73 @@ class ClipboardBehaviourTests(unittest.TestCase):
         self.app._check_clipboard()          # 同样的剪贴板内容
         self.assertFalse(self.app.clip_bar.winfo_manager())
 
+    # ---------- 不支持的平台要说明白 ----------
+
+    WECHAT = "https://weixin.qq.com/sph/AhMkUsjhOF"
+    TIKTOK = "https://www.tiktok.com/@a/video/1"
+
+    def _status_text(self):
+        """状态文字写在**当前面板**上（_set_status_anywhere 的落点）。"""
+        return self.app.pages["youtube"].video_panel._status_full[0]
+
+    def test_unsupported_platform_is_named(self):
+        """以前这里完全静默，用户粘了链接却毫无反应。"""
+        self._feed_clipboard(self.WECHAT)
+        text = self._status_text()
+        self.assertIn(i18n.tr("platform_wechat_channels"), text)
+        self.assertIn(i18n.tr("unsupported_platform",
+                              platform=i18n.tr("platform_wechat_channels")), text)
+        self.assertNotIn(i18n.tr("clipboard_no_link"), text,
+                         "明明有链接，不能说「没有可识别的链接」")
+
+    def test_engine_supported_platform_gets_the_hint(self):
+        """小红书/TikTok 的提取器 yt-dlp 自带，只是界面没做，提示要如实。"""
+        self._feed_clipboard(self.TIKTOK)
+        self.assertIn(i18n.tr("unsupported_platform_engine_hint"),
+                      self._status_text())
+
+    def test_engine_unsupported_platform_has_no_hint(self):
+        self._feed_clipboard(self.WECHAT)
+        self.assertNotIn(i18n.tr("unsupported_platform_engine_hint"),
+                         self._status_text())
+
+    def test_unknown_site_is_not_reported_as_missing_link(self):
+        self._feed_clipboard("https://example.com/x")
+        self.assertIn(i18n.tr("unsupported_link_other"), self._status_text())
+
+    def test_really_missing_link_still_says_so(self):
+        self.app._last_clipboard = None
+        self.app.clipboard_get = lambda: "just some text"
+        self.app._check_clipboard(force=True)
+        self.assertIn(i18n.tr("clipboard_no_link"), self._status_text())
+
+    def test_unsupported_is_reported_once_per_text(self):
+        calls = []
+        panel = self.app.pages["youtube"].video_panel
+        original = panel._set_status
+        panel._set_status = lambda text, **kw: calls.append(text)
+        try:
+            self._feed_clipboard(self.WECHAT)
+            self._feed_clipboard(self.WECHAT)      # 同一段剪贴板内容
+        finally:
+            panel._set_status = original
+        self.assertEqual(len(calls), 1, "同一段文本不该反复刷屏")
+
+    def test_menubar_paste_names_the_platform(self):
+        self.app._last_clipboard = None
+        self.app.clipboard_get = lambda: self.WECHAT
+        self.app._check_clipboard(force=True)
+        text = self._status_text()
+        self.assertIn(i18n.tr("platform_wechat_channels"), text)
+        self.assertNotIn(i18n.tr("clipboard_no_link"), text)
+
+    def test_accepting_an_unsupported_suggestion_explains(self):
+        """点一下建议条却什么都不发生是最糟的反馈。"""
+        self.app._clipboard_suggestion = self.WECHAT
+        self.app._accept_clipboard_suggestion()
+        self.assertIn(i18n.tr("platform_wechat_channels"), self._status_text())
+        self.assertEqual(self.probes, [], "不该把不支持的链接塞给任何面板")
+
     # ---------- 接受 / 忽略 ----------
 
     def test_accept_fills_and_probes(self):

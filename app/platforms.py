@@ -10,6 +10,46 @@ from typing import Optional
 PLATFORMS = ("youtube", "x", "instagram", "douyin", "bilibili", "weibo")
 
 
+# 常见、但本应用没有面板的站点。**只用于给出准确说明**：用户粘进来时告诉他
+# 「这个平台不支持」而不是沉默或谎称「没有链接」。
+#
+# 每条是 (域名后缀, 路径前缀, 平台名 i18n 键, 下载引擎是否支持)：
+# 引擎支持与否会影响提示措辞——小红书/TikTok 的提取器 yt-dlp 自带（实测过
+# extractor 列表），只是界面还没做面板；视频号/公众号/快手则引擎也没有。
+UNSUPPORTED_SITES = (
+    ("channels.weixin.qq.com", "", "platform_wechat_channels", False),
+    ("weixin.qq.com", "/sph", "platform_wechat_channels", False),
+    ("mp.weixin.qq.com", "", "platform_wechat_article", False),
+    ("xiaohongshu.com", "", "platform_xiaohongshu", True),
+    ("xhslink.com", "", "platform_xiaohongshu", True),
+    ("kuaishou.com", "", "platform_kuaishou", False),
+    ("tiktok.com", "", "platform_tiktok", True),
+)
+
+
+def unsupported_site(url: str):
+    """已知但没有面板的站点 → ``(平台名 i18n 键, 引擎是否支持)``；否则 None。
+
+    域名按**边界**匹配：``notweixin.qq.com`` 不算微信（子串匹配会误判）。
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(str(url or "").strip())
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    path = (parts.path or "").lower()
+    if not host:
+        return None
+    for suffix, prefix, key, engine_ok in UNSUPPORTED_SITES:
+        if host == suffix or host.endswith("." + suffix):
+            if prefix and not path.startswith(prefix):
+                continue
+            return key, engine_ok
+    return None
+
+
 def detect(url: str) -> Optional[str]:
     """根据链接判断平台标识；无法识别时返回 None。"""
     low = (url or "").lower()

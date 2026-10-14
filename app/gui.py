@@ -4668,6 +4668,9 @@ class App(tk.Tk):
         if platform in self.pages:
             self.show_page(platform)
             self.pages[platform].handle_url(url)
+            return
+        # 点了一下却什么都没发生是最糟的反馈，说明白为什么不支持
+        self._set_status_anywhere(self._unsupported_message(url), error=True)
 
     def _dismiss_clipboard_suggestion(self):
         self._hide_clipboard_suggestion()
@@ -4690,13 +4693,22 @@ class App(tk.Tk):
             return
         url = extract_supported_url(text)
         if not url:
-            if force:
+            # URL_RE 是按平台严格匹配的，不支持的链接在这里就是 None。先判断
+            # 「到底有没有链接」：有链接但不支持，要说清是哪个平台；真的没有链接，
+            # 才说「没有可识别的链接」——两者对用户是完全不同的信息。
+            found = parse_links(text)
+            if found and (force or action != "off"):
+                self._set_status_anywhere(self._unsupported_message(found[0]),
+                                          error=True)
+                return
+            if force and not found:
                 self._set_status_anywhere(i18n.tr("clipboard_no_link"), error=True)
             return
         platform = detect_platform(url)
         if platform not in self.pages:
-            if force:
-                self._set_status_anywhere(i18n.tr("clipboard_no_link"), error=True)
+            # 已知但不支持的平台要**主动说一句**（每个剪贴板文本只说一次，
+            # 靠上面 _last_clipboard 的去重，不会反复刷屏）
+            self._set_status_anywhere(self._unsupported_message(url), error=True)
             return
         if force or action == "auto":
             # 保留旧行为，但改成需要用户显式选择
@@ -4704,6 +4716,21 @@ class App(tk.Tk):
             self.pages[platform].handle_url(url)
             return
         self._show_clipboard_suggestion(url)
+
+    def _unsupported_message(self, url):
+        """链接进不了任何面板时，给一句**准确**的说明。
+
+        以前是静默返回（或不区分情况地说「剪贴板里没有可识别的链接」）：用户
+        明确粘了一个链接进来，得到的却是「没有链接」，只会以为软件坏了。
+        """
+        info = platforms.unsupported_site(url)
+        if info is None:
+            return i18n.tr("unsupported_link_other")
+        key, engine_ok = info
+        message = i18n.tr("unsupported_platform", platform=i18n.tr(key))
+        if engine_ok:
+            message += "　" + i18n.tr("unsupported_platform_engine_hint")
+        return message
 
     def _set_status_anywhere(self, text, error=False):
         """把状态写到当前可见面板（menubar 动作发生在哪个页面并不确定）。"""

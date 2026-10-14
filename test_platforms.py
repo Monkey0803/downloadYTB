@@ -132,9 +132,37 @@ def test_platform_cookie_change_writes_only_non_defaults():
         _reset()
 
 
+def test_unsupported_sites_are_named_and_boundary_safe():
+    """常见但不支持的平台要能报出名字；域名匹配必须按边界，不能子串误判。"""
+    cases = {
+        "https://weixin.qq.com/sph/AhMkUsjhOF": ("platform_wechat_channels", False),
+        "https://channels.weixin.qq.com/finder-preview/pages/sph?id=x":
+            ("platform_wechat_channels", False),
+        "https://mp.weixin.qq.com/s/abc": ("platform_wechat_article", False),
+        "https://www.xiaohongshu.com/explore/abc": ("platform_xiaohongshu", True),
+        "https://xhslink.com/abc": ("platform_xiaohongshu", True),
+        "https://v.kuaishou.com/abc": ("platform_kuaishou", False),
+        "https://www.tiktok.com/@a/video/1": ("platform_tiktok", True),
+        "https://vt.tiktok.com/abc/": ("platform_tiktok", True),
+    }
+    for url, expected in cases.items():
+        assert platforms.unsupported_site(url) == expected, url
+    # 边界：相似域名不算；普通 weixin.qq.com 链接（非 /sph）也不当视频号
+    for url in ("https://notweixin.qq.com/sph/x",
+                "https://weixin.qq.com/other/x",
+                "https://example.com/x",
+                "https://www.youtube.com/watch?v=x",
+                ""):
+        assert platforms.unsupported_site(url) is None, url
+    # 已支持的平台绝不能被当成「不支持」
+    for url in cases:
+        assert platforms.detect(url) is None
+
+
 if __name__ == "__main__":
     test_detect_maps_every_supported_platform()
     test_platform_override_wins_over_global_sources()
     test_platform_overrides_are_cleaned()
     test_platform_cookie_change_writes_only_non_defaults()
-    print("PASS: 链接→平台映射与按平台 Cookie 优先级")
+    test_unsupported_sites_are_named_and_boundary_safe()
+    print("PASS: 链接→平台映射、按平台 Cookie 优先级、不支持平台的识别")
