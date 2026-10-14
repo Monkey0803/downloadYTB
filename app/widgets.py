@@ -1154,3 +1154,32 @@ class SidebarItem(tk.Canvas):
     def retheme(self):
         self.configure(bg=theme.C().SIDEBAR_BG)
         self._draw()
+
+
+def _pack_wrapped_hint(master, app, text, bg_role="BG", pady=(0, 8)):
+    """按控件宽度自动换行的说明文字（TLabel 本身不会自动折行）。"""
+    label = TLabel(master, text=text, font=app.f_small, bg_role=bg_role,
+                   fg_role="TEXT_SUB", anchor="w", justify="left", wraplength=1)
+
+    def update_wraplength(event):
+        wraplength = max(1, event.width - 2)
+        if int(label.cget("wraplength")) != wraplength:
+            label.configure(wraplength=wraplength)
+
+    label.bind("<Configure>", update_wraplength)
+    label.pack(fill="x", pady=pady)
+    return label
+
+
+def _check_pill_width(font, text, extra=44):
+    """CheckPill 的文字是 Canvas 自绘的，宽度不够会被直接裁掉。
+
+    英文（以及其他语言）文案常比中文长一半以上，所以按实际字体测量，
+    而不是写死像素——写死过一次 340，英文直接被截成
+    "Skip images that were already downloade"。
+    """
+    try:
+        measured = font.measure(text)
+    except Exception:
+        return 300
+    return max(120, measured + extra)  # extra = 复选框 18px + 左右内边距

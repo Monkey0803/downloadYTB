@@ -30,7 +30,7 @@
 | 10 | 字幕只存 `.srt`，无嵌入；不保存封面与元数据 | `app/core.py:238` `writesubtitles: True`，无 `FFmpegEmbedSubtitle` / `addmetadata` / `embedthumbnail` | 3 | 4 | 3 | 4.0 | ✅ 已完成：三个开关（默认关）→ 显式后处理器列表（选项键只有 CLI 认，实测踩到）；补 mutagen 依赖；真实下载验证过封面与元数据确实进文件 |
 | 11 | 没有关于对话框（版本、依赖、日志路径、一键复制报告） | 无 About 相关代码；诊断报告已存在但没有集中入口 | 2 | 4 | 2 | 4.0 | ✅ 已完成：新增 `app/about.py`（原样展示诊断报告 + 复制/打开日志/发布页），设置页与菜单栏版本项两个入口 |
 | 12 | 无设置导入/导出，换机迁移要手抄 | `settings.json` 只有本地读写 | 2 | 4 | 2 | 4.0 | ✅ 已完成：新增 `app/settings_io.py`（只认已有键、类型与取值校验、排除敏感/机器相关），设置页「设置导入导出」卡片，导入后立刻应用 |
-| 13 | `app/gui.py` 单文件 4,066 行（占全项目 42%），每次改动都落在同一文件 | `wc -l app/gui.py` = 4066 / 9660 | 3 | 5 | 4 | 3.8 | ⏳ 进行中：已抽出 `urlutil.py` / `fspath.py`（纯工具）与 `dialogs.py`（弹窗），gui.py 4851 → 4.6k 行；面板与页面仍待搬 |
+| 13 | `app/gui.py` 单文件 4,066 行（占全项目 42%），每次改动都落在同一文件 | `wc -l app/gui.py` = 4066 / 9660 | 3 | 5 | 4 | 3.8 | ⏳ 进行中：已抽出 `urlutil.py` / `fspath.py`（纯工具）、`dialogs.py`（四个弹窗）、`widgets.py` 收纳共用控件辅助；gui.py 4851 → 4231 行；面板与页面仍待搬 |
 | 14 | Windows 无安装包、Linux 无 `.desktop`/AppImage | CI 只产出 zip（`.github/workflows/release.yml`） | 2 | 4 | 3 | 2.7 | 待办 |
 | 15 | 小众能力：章节分割、SponsorBlock、限速、分片并发 | 引擎选项中均无 | 2 | 3 | 3 | 2.0 | 待办 |
 
