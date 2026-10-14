@@ -9,7 +9,7 @@
 
 import unittest
 
-from app import gui, i18n, settings as settings_mod
+from app import gui, i18n, settings as settings_mod, settingspage
 
 _ORIGINAL_LOAD = settings_mod.load
 _ORIGINAL_SAVE = settings_mod.save
@@ -124,7 +124,8 @@ class SubtitleSettingWiringTests(unittest.TestCase):
         self.assertEqual(self.saved.get("subtitle_langs"), "en,ja")
 
     def test_picker_result_is_written_back(self):
-        original = gui.SubtitleLanguagePicker
+        # _open_subtitle_picker 是设置页的方法，代码住在 app/settingspage.py
+        original = settingspage.SubtitleLanguagePicker
 
         class FakePicker:
             def __init__(self, *a, **kw):
@@ -133,16 +134,16 @@ class SubtitleSettingWiringTests(unittest.TestCase):
             def show(self):
                 return "zh-Hans,en"
 
-        gui.SubtitleLanguagePicker = FakePicker
+        settingspage.SubtitleLanguagePicker = FakePicker
         try:
             self.page._open_subtitle_picker()
         finally:
-            gui.SubtitleLanguagePicker = original
+            settingspage.SubtitleLanguagePicker = original
         self.assertEqual(self.page.subtitle_langs_var.get(), "zh-Hans,en")
         self.assertEqual(self.saved.get("subtitle_langs"), "zh-Hans,en")
 
     def test_cancelling_picker_changes_nothing(self):
-        original = gui.SubtitleLanguagePicker
+        original = settingspage.SubtitleLanguagePicker
 
         class Cancelling:
             def __init__(self, *a, **kw):
@@ -153,11 +154,11 @@ class SubtitleSettingWiringTests(unittest.TestCase):
 
         self.page.subtitle_langs_var.set("en")
         self.app.update_idletasks()
-        gui.SubtitleLanguagePicker = Cancelling
+        settingspage.SubtitleLanguagePicker = Cancelling
         try:
             self.page._open_subtitle_picker()
         finally:
-            gui.SubtitleLanguagePicker = original
+            settingspage.SubtitleLanguagePicker = original
         self.assertEqual(self.page.subtitle_langs_var.get(), "en")
 
     def test_choose_button_exists(self):

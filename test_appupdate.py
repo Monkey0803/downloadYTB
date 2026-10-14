@@ -12,7 +12,7 @@
 import unittest
 from unittest.mock import patch
 
-from app import appupdate, gui, i18n, settings as settings_mod
+from app import appupdate, gui, i18n, settings as settings_mod, settingspage
 
 _ORIGINAL_SAVE = settings_mod.save
 _ORIGINAL_MENUBAR = gui.menubar.create
@@ -356,14 +356,16 @@ class VersionCardTests(unittest.TestCase):
     def test_open_release_page_uses_the_stored_url(self):
         self.app._release_url = "https://e/rel"
         opened = []
-        with patch.object(gui, "open_path", opened.append):
+        # _open_release_page 是设置页的方法：打桩要落在 settingspage 上
+        with patch.object(settingspage, "open_path", opened.append):
             self.page._open_release_page()
         self.assertEqual(opened, ["https://e/rel"])
 
     def test_open_release_page_falls_back_to_the_releases_page(self):
         self.app._release_url = ""
         opened = []
-        with patch.object(gui, "open_path", opened.append):
+        # _open_release_page 是设置页的方法：打桩要落在 settingspage 上
+        with patch.object(settingspage, "open_path", opened.append):
             self.page._open_release_page()
         self.assertEqual(opened, [appupdate.RELEASES_PAGE])
 
