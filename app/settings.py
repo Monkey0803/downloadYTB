@@ -37,6 +37,10 @@ DEFAULTS = {
     # 网络代理（空 = 直连；空时自动采用 HTTP(S)_PROXY 环境变量）
     "proxy": "",
     # 版本与更新：是否自动检查、上次检查时间、已知可用的新版本
+    # 嵌入到文件（第 10 项；默认关，避免改变既有产物）
+    "embed_subtitles": False,
+    "embed_thumbnail": False,
+    "embed_metadata": False,
     # 下载完成后的后续动作：none / open_folder / open_file / quit / sleep
     "after_download": "none",
     "check_updates": True,

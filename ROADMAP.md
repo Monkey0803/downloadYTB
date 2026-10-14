@@ -27,7 +27,7 @@
 | 7 | 界面不显示版本，也没有新版本提示 | `__version__` 在 `app/gui.py`、`app/menubar.py` 中零引用 | 3 | 4 | 2 | 6.0 | ✅ 已完成：新增 `app/appupdate.py`（GitHub Releases 检查、24 小时节流、可关闭），设置页「版本与更新」卡片 + 菜单栏版本项（有新版变成可点提示） |
 | 8 | 下载完成后没有后续动作 | 无「完成后打开文件夹 / 退出 / 关机」相关代码；`notify_download_finished` 仅用于前进队列 | 3 | 4 | 2 | 6.0 | ✅ 已完成：新增 `app/postaction.py`，仅在**真正空闲**（队列也空）时触发一次；实现为睡眠而非关机（关机不可逆） |
 | 9 | 图片下载无法入队 | 队列只加在视频面板（`ImagePanel` 无 `queue_btn`，`test_queue.py` 有断言） | 2 | 4 | 2 | 4.0 | ✅ 已完成：队列条目加 `kind`，图片页也有「加入队列」；执行时按类型切面板，老条目（无 kind）仍按视频跑 |
-| 10 | 字幕只存 `.srt`，无嵌入；不保存封面与元数据 | `app/core.py:238` `writesubtitles: True`，无 `FFmpegEmbedSubtitle` / `addmetadata` / `embedthumbnail` | 3 | 4 | 3 | 4.0 | 待办 |
+| 10 | 字幕只存 `.srt`，无嵌入；不保存封面与元数据 | `app/core.py:238` `writesubtitles: True`，无 `FFmpegEmbedSubtitle` / `addmetadata` / `embedthumbnail` | 3 | 4 | 3 | 4.0 | ✅ 已完成：三个开关（默认关）→ 显式后处理器列表（选项键只有 CLI 认，实测踩到）；补 mutagen 依赖；真实下载验证过封面与元数据确实进文件 |
 | 11 | 没有关于对话框（版本、依赖、日志路径、一键复制报告） | 无 About 相关代码；诊断报告已存在但没有集中入口 | 2 | 4 | 2 | 4.0 | 待办 |
 | 12 | 无设置导入/导出，换机迁移要手抄 | `settings.json` 只有本地读写 | 2 | 4 | 2 | 4.0 | 待办 |
 | 13 | `app/gui.py` 单文件 4,066 行（占全项目 42%），每次改动都落在同一文件 | `wc -l app/gui.py` = 4066 / 9660 | 3 | 5 | 4 | 3.8 | 待办 |

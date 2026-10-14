@@ -3,6 +3,8 @@ yt-dlp-ejs
 gallery-dl
 requests
 pillow
+# yt-dlp 给 mp3/m4a 嵌封面靠 mutagen；它不在 yt-dlp 的默认依赖里（第 10 项）
+mutagen
 imageio-ffmpeg
 pyinstaller
 pyobjc-framework-Cocoa ; sys_platform == "darwin"

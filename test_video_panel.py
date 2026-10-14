@@ -331,6 +331,27 @@ class PlaylistUiTests(unittest.TestCase):
         # 有勾选时补零宽度按最大勾选下标（9）而不是「下载范围」的 25
         self.assertEqual(captured["playlist_size_hint"], 9)
 
+    def test_download_params_carry_the_embed_switches(self):
+        """第 10 项：面板要把「嵌入到文件」三个开关交给引擎。"""
+        self.panel._probe_done(self._playlist_info())
+        # 链接要与解析结果一致，否则 on_download 会走「重新解析」分支而不组装参数
+        self.panel.url_var.set(self.panel._info.url)
+        self.app.settings["embed_metadata"] = True
+        self.app.settings["embed_thumbnail"] = False
+        try:
+            captured = {}
+            original = gui.VideoPanel._start_download
+            gui.VideoPanel._start_download = lambda self, resume: captured.update(
+                self._dl_params)
+            try:
+                self.panel.on_download()
+            finally:
+                gui.VideoPanel._start_download = original
+        finally:
+            self.app.settings["embed_metadata"] = False
+        self.assertEqual(captured["embed"],
+                         {"subtitles": False, "thumbnail": False, "metadata": True})
+
     def test_range_choice_is_persisted(self):
         self.panel._probe_done(self._playlist_info())
         self.panel.playlist_limit_var.set(self.panel._playlist_limit_label(25))

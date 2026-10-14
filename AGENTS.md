@@ -46,7 +46,7 @@ Use Python 3 style, four-space indentation, descriptive `snake_case` functions a
 ## Testing Guidelines
 
 Run `test_i18n.py`, `test_save_dir_sync.py`, and relevant unit tests for local changes. The offline suite is `test_i18n.py`, `test_save_dir_sync.py`, `test_weibo.py`, `test_browser_cookies.py`, `test_audio_options.py`, `test_windowing.py`, `test_diagnostics.py`, `test_shortcuts.py`, `test_platforms.py`, `test_dock.py`, `test_video_options.py`, `test_image_skip.py`, `test_video_panel.py`, `test_playlist.py`, `test_taskbar.py`, `test_taskbar_kde.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`,
-`test_release_notes.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, `test_menubar.py`, `test_contrast.py`, `test_font_scale.py`, `test_queue.py`, `test_platform_identity.py`, `test_post_folder.py`, `test_ytdlp_update.py`, `test_logging.py`, `test_thumbnails.py`, `test_proxy.py`, `test_appupdate.py`, and `test_after_download.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
+`test_release_notes.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`, `test_menubar.py`, `test_contrast.py`, `test_font_scale.py`, `test_queue.py`, `test_platform_identity.py`, `test_post_folder.py`, `test_ytdlp_update.py`, `test_logging.py`, `test_thumbnails.py`, `test_proxy.py`, `test_appupdate.py`, `test_after_download.py`, and `test_embed.py`; they all run without network access and only the Tk-based ones (`test_shortcuts.py`, `test_video_panel.py`, `test_clipboard.py`, `test_status_detail.py`, `test_subtitle_picker.py`, `test_history.py`, `test_settings_layout.py`, `test_keyboard.py`, `test_onboarding.py`) need a display; they create a real window and therefore patch `settings.load`/`settings.save` so they cannot touch the user's own `settings.json`. **Each Tk-based test file must create exactly one `App` for the whole file and never destroy it**: the first Tk initialisation costs seconds, and destroying a Tk root and creating another one in the same process segfaults on macOS (both observed here). Reusing one App also took `test_clipboard.py` from 171s to 3s. Cards built with `GlassCard` need a height that fits their content: it pins the inner body to `height - padding`, so oversized content is silently clipped (a history row at 96px clipped its whole button row). `test_history.py` asserts body height against `winfo_reqheight()` to catch that class of bug. `test_dock.py` uses a fake AppKit module and asserts against the real `NSApp` semantics without opening a window. Background work follows one pattern: the worker thread does the slow call and
 hops back with `self.app.after(0, callback)`. That hop **requires a running
 `mainloop()`** — Tk raises `RuntimeError: main thread is not in main loop` when a
 non-main thread calls `after` while the main thread is only pumping `update()`, so a test
@@ -166,6 +166,30 @@ never fight over one progress bar. Panels call `App.notify_download_finished()` 
 `_reset_after_download()`, which schedules the next advance with `after(...)` — advancing
 synchronously inside a panel's own reset would re-enter the download flow and corrupt its
 state.
+
+## Embedding Subtitles / Cover / Metadata
+
+Three settings (`embed_subtitles`, `embed_thumbnail`, `embed_metadata`, all off) map to
+`core.embed_postprocessors()`. The trap worth remembering:
+
+- **`addmetadata` / `embedsubtitles` / `embedthumbnail` are CLI-only option keys.** Only
+  `yt_dlp/__init__.py` (the command-line layer) turns them into postprocessors; passing them
+  through the Python API does *nothing* at all — the cover is still written as a loose file and
+  the metadata/subtitles never enter the container. The first version of this feature did exactly
+  that and looked correct in unit tests; only a real download showed the file had no embedded
+  cover. `embed_postprocessors()` builds the list explicitly, in the CLI's order.
+- **Order matters**: audio is extracted first, then metadata is written, then the cover is
+  embedded (`FFmpegMetadata` before audio extraction would write into the intermediate container
+  that then gets replaced). `FFmpegThumbnailsConvertor` runs first because a **webp** cover cannot
+  be embedded into mp3 — yt-dlp fails that silently, which is also why `writethumbnail` (a key the
+  Python API *does* honour) is set separately.
+- Because postprocessors skip silently, the embedding path turns `no_warnings` **off** and installs
+  `_PostprocessLogger`, which forwards yt-dlp warnings/errors into the app log. Without that,
+  yt-dlp does not even call the logger, and "I turned embedding on and nothing happened" is
+  undiagnosable.
+- `mutagen` is required for mp3/m4a cover embedding and is **not** a yt-dlp dependency, so it is in
+  `requirements.txt` and each build script passes `--hidden-import mutagen` (yt-dlp imports it
+  lazily, so PyInstaller would otherwise drop it).
 
 ## After-download Action
 

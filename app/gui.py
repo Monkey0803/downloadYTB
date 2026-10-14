@@ -1277,6 +1277,7 @@ class VideoPanel(TFrame):
                           and self.platform == "youtube"
                           and bool(self.subtitle_var.get())),
             "subtitle_langs": self.app.settings.get("subtitle_langs", ""),
+            "embed": self.app.embed_settings(),
             # 只有解析到播放列表时才可能扩大下载范围；否则固定为「仅当前视频」
             "is_playlist": bool(self._info.playlist_count),
             "playlist_limit": (self._playlist_limit()
@@ -1478,7 +1479,8 @@ class VideoPanel(TFrame):
                                                pause_event=pause_event,
                                                bitrate_kbps=p["audio_bitrate"],
                                                format_id=p["audio_format_id"],
-                                               audio_format=p["audio_format"])
+                                               audio_format=p["audio_format"],
+                                               embed=p["embed"])
                 elif p["is_playlist"] and (p["playlist_items"]
                                            or p["playlist_limit"] != 1):
                     paths = core.download_playlist(
@@ -1490,7 +1492,8 @@ class VideoPanel(TFrame):
                         playlist_items=p["playlist_items"],
                         progress=on_progress, entry_progress=on_entry,
                         cancel_event=cancel_event, pause_event=pause_event,
-                        subtitles=p["subtitles"], subtitle_langs=p["subtitle_langs"])
+                        subtitles=p["subtitles"], subtitle_langs=p["subtitle_langs"],
+                        embed=p["embed"])
                 else:
                     path = core.download_video(p["url"], height=p["height"],
                                                save_dir=p["save_dir"],
@@ -1498,7 +1501,8 @@ class VideoPanel(TFrame):
                                                cancel_event=cancel_event,
                                                pause_event=pause_event,
                                                subtitles=p["subtitles"],
-                                               subtitle_langs=p["subtitle_langs"])
+                                               subtitle_langs=p["subtitle_langs"],
+                                               embed=p["embed"])
             except core.DownloadCancelled:
                 self.after(0, self._download_cancelled)
             except core.DownloadPaused as exc:
@@ -2781,6 +2785,30 @@ class SettingsPage(TFrame):
                            bg_role="CARD", pady=(8, 0))
         self._track_card("subtitles", card_sub, bs)
 
+        # —— 嵌入到文件 ——
+        card_embed = GlassCard(self._scroll_body)
+        card_embed.set_height(200)
+        card_embed.pack(fill="x", pady=(0, 12))
+        be = card_embed.body
+        TLabel(be, text=i18n.tr("embed_card"), font=f.f_section,
+               bg_role="CARD", fg_role="TEXT_SUB").pack(anchor="w")
+        self.embed_vars = {}
+        for index, (key, text_key) in enumerate((
+                ("embed_subtitles", "embed_subtitles"),
+                ("embed_thumbnail", "embed_thumbnail"),
+                ("embed_metadata", "embed_metadata"))):
+            variable = tk.BooleanVar(value=bool(app.settings.get(key, False)))
+            variable.trace_add(
+                "write", lambda *a, k=key, v=variable: self._on_embed_change(k, v))
+            self.embed_vars[key] = variable
+            CheckPill(be, i18n.tr(text_key), variable, font=f.f_btn,
+                      bg_role="CARD",
+                      width=_check_pill_width(f.f_btn, i18n.tr(text_key))
+                      ).pack(anchor="w", pady=(10 if index == 0 else 8, 0))
+        _pack_wrapped_hint(be, app, i18n.tr("embed_hint"), bg_role="CARD",
+                           pady=(8, 0))
+        self._track_card("embed", card_embed, be)
+
         # —— 完成后动作 ——
         card_after = GlassCard(self._scroll_body)
         card_after.set_height(170)
@@ -3198,6 +3226,15 @@ class SettingsPage(TFrame):
         url = getattr(self.app, "_release_url", "") or appupdate.RELEASES_PAGE
         applog.log_event("open_release_page", url=url)
         open_path(url)
+
+    def _on_embed_change(self, key, variable):
+        """三个「嵌入到文件」开关：改一个存一个（默认全关，开才会改动产物）。"""
+        enabled = bool(variable.get())
+        if bool(self.app.settings.get(key, False)) == enabled:
+            return
+        self.app.settings[key] = enabled
+        settings.save(self.app.settings)
+        applog.log_event("embed_setting", key=key, enabled=enabled)
 
     def _on_after_download_change(self):
         value = postaction.value_for_label(self.after_download_var.get())
@@ -3816,6 +3853,14 @@ class App(tk.Tk):
         self.after(200, self.advance_queue)
         # 排在队列推进之后：队列里还有任务就不该触发「完成后动作」
         self.after(400, self._maybe_run_after_download)
+
+    def embed_settings(self):
+        """「嵌入到文件」的三个开关，交给引擎翻译成 yt-dlp 参数。"""
+        return {
+            "subtitles": bool(self.settings.get("embed_subtitles", False)),
+            "thumbnail": bool(self.settings.get("embed_thumbnail", False)),
+            "metadata": bool(self.settings.get("embed_metadata", False)),
+        }
 
     def is_idle(self):
         """没有任何面板在下载、队列里也没有待办。"""

@@ -33,6 +33,7 @@ mkdir -p build/work
     --collect-all gallery_dl \
     --collect-all yt_dlp_ejs \
     --hidden-import AppKit \
+    --hidden-import mutagen \
     --workpath build/work \
     --specpath build \
     main.py

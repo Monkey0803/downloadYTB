@@ -25,6 +25,7 @@ if not exist build\work mkdir build\work
     --collect-all imageio_ffmpeg ^
     --collect-all gallery_dl ^
     --collect-all yt_dlp_ejs ^
+    --hidden-import mutagen ^
     --workpath build\work ^
     --specpath build ^
     main.py

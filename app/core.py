@@ -15,6 +15,7 @@ from typing import Callable, List, Optional
 
 import yt_dlp
 
+from . import applog
 from . import i18n
 from . import browser_cookies
 from . import netproxy
@@ -217,6 +218,54 @@ def _base_opts(with_cookies: bool = True, platform: Optional[str] = None) -> dic
     # yt-dlp 不读 HTTP(S)_PROXY 环境变量，代理必须显式传参（netproxy 已处理优先级）
     opts.update(netproxy.ytdlp_options())
     return opts
+
+
+class _PostprocessLogger:
+    """把 yt-dlp 的警告/错误转发到应用日志。
+
+    为什么必须转发：后处理器**会静默跳过**。实测 mp3 嵌 webp 封面时 yt-dlp 一声不响
+    地什么都没做，而应用默认还关掉了 no_warnings——用户只会看到「说嵌了却没嵌」。
+    """
+
+    def debug(self, message):
+        pass
+
+    def info(self, message):
+        pass
+
+    def warning(self, message):
+        applog.log_event("ytdlp_warning", message=str(message)[:400])
+
+    def error(self, message):
+        applog.log_event("ytdlp_error", message=str(message)[:400])
+
+
+def embed_postprocessors(subtitles=False, thumbnail=False, metadata=False,
+                         keep_subtitles=False, **_) -> list:
+    """把「嵌入到文件」翻译成 yt-dlp 的**后处理器**列表（第 10 项）。
+
+    关键坑（实测踩到）：``addmetadata`` / ``embedsubtitles`` / ``embedthumbnail``
+    这些选项键**只有 yt-dlp 的命令行层**才会翻译成后处理器（见 yt_dlp/__init__.py），
+    直接走 Python API 传这些键**什么都不会发生**——封面会照旧只留一个图片文件，
+    元数据和字幕根本进不去。这里照 CLI 的顺序显式构造。
+
+    顺序也不是随意排的：元数据必须在音频提取**之后**（提取前的容器可能不支持），
+    封面要先转成容器认得的格式（webp 嵌不进 mp3），再嵌。
+    """
+    posts = []
+    if thumbnail:
+        posts.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg"})
+    if subtitles:
+        # 只有用户本来就勾了「下载字幕」才保留 .srt，否则嵌入完就删（产物干净）
+        posts.append({"key": "FFmpegEmbedSubtitle",
+                      "already_have_subtitle": bool(keep_subtitles)})
+    if metadata:
+        posts.append({"key": "FFmpegMetadata", "add_metadata": True,
+                      "add_chapters": False, "add_infojson": False})
+    if thumbnail:
+        # already_have_thumbnail=True 保住那张 jpg（提示里承诺过会留一张封面）
+        posts.append({"key": "EmbedThumbnail", "already_have_thumbnail": True})
+    return posts
 
 
 def subtitle_options(langs=None) -> dict:
@@ -732,6 +781,7 @@ def download_video(
     pause_event: Optional[threading.Event] = None,
     subtitles: bool = False,
     subtitle_langs=None,
+    embed=None,
 ) -> str:
     """下载视频（指定最大清晰度），由 ffmpeg 合并为单个 mp4，返回文件路径。
 
@@ -754,8 +804,19 @@ def download_video(
 
     seen_files: set = set()
     opts = _base_opts(platform=platforms.detect(url))
-    if subtitles:
+    embedding = embed or {}
+    # 「嵌入字幕」本身就需要字幕文件，所以它也会打开字幕下载
+    if subtitles or embedding.get("subtitles"):
         opts.update(subtitle_options(subtitle_langs))
+    if embedding.get("thumbnail"):
+        opts["writethumbnail"] = True          # 这个键 Python API 认（写文件用）
+    posts = embed_postprocessors(keep_subtitles=bool(subtitles), **embedding)
+    if posts:
+        opts["postprocessors"] = posts
+        # no_warnings 必须先关掉：yt-dlp 在 no_warnings 下**根本不调用** logger，
+        # 后处理器静默跳过就彻底无迹可查（正是这次踩的坑）
+        opts["no_warnings"] = False
+        opts["logger"] = _PostprocessLogger()
     opts.update(
         {
             "format": fmt,
@@ -854,6 +915,7 @@ def download_playlist(
     playlist_title: str = "",
     progress: Optional[ProgressCallback] = None,
     entry_progress=None,
+    embed=None,
     cancel_event: Optional[threading.Event] = None,
     pause_event: Optional[threading.Event] = None,
     subtitles: bool = False,
@@ -893,6 +955,16 @@ def download_playlist(
     collected: List[str] = []
     info_out: List[dict] = []
     opts = _base_opts(platform=platforms.detect(url))
+    embedding = embed or {}
+    if subtitles or embedding.get("subtitles"):
+        opts.update(subtitle_options(subtitle_langs))
+    if embedding.get("thumbnail"):
+        opts["writethumbnail"] = True
+    posts = embed_postprocessors(keep_subtitles=bool(subtitles), **embedding)
+    if posts:
+        opts["postprocessors"] = posts
+        opts["no_warnings"] = False
+        opts["logger"] = _PostprocessLogger()
     opts.update({
         "noplaylist": False,
         "format": fmt,
@@ -952,11 +1024,15 @@ def download_audio(
     bitrate_kbps: int = 192,
     format_id: Optional[str] = None,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
+    embed=None,
 ) -> str:
     """仅下载音频并按 ``audio_format`` 转码，返回文件路径。"""
     os.makedirs(save_dir, exist_ok=True)
     seen_files: set = set()
     opts = _base_opts(platform=platforms.detect(url))
+    embedding = embed or {}
+    if embedding.get("thumbnail"):
+        opts["writethumbnail"] = True
     opts.update(
         {
             "format": f"{format_id}/bestaudio/best" if format_id else "bestaudio/best",
@@ -966,11 +1042,15 @@ def download_audio(
             "progress_hooks": [
                 _make_progress_hook(progress, cancel_event, seen_files, pause_event)
             ],
-            "postprocessors": [
-                _audio_postprocessor(audio_format, bitrate_kbps)
-            ],
+            # 顺序要紧：先提取音频，再写元数据、嵌封面（提取前嵌会被丢掉）
+            "postprocessors": [_audio_postprocessor(audio_format, bitrate_kbps)]
+                             + embed_postprocessors(**embedding),
         }
     )
+    if embed_postprocessors(**embedding):
+        # 音频的嵌入全靠后处理器，静默跳过同样要留痕
+        opts["no_warnings"] = False
+        opts["logger"] = _PostprocessLogger()
     return _run_download_with_cookie_fallback(
         url, opts, cancel_event=cancel_event,
         seen_files=seen_files, pause_event=pause_event)
