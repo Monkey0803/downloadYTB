@@ -340,6 +340,24 @@ def embed_postprocessors(subtitles=False, thumbnail=False, metadata=False,
     return posts
 
 
+def with_chapter_template(template, extras=None):
+    """需要按章节切分时，把输出模板升级成带 ``chapter`` 键的字典。
+
+    yt-dlp 的 FFmpegSplitChaptersPP 用 ``prepare_filename(info, 'chapter')`` 逐章取名，
+    只认字典里的 ``chapter`` 项。**只给字符串模板时每一章都落到同一个文件名**——不报错，
+    只是互相覆盖，最后只剩一个文件（真实下载验证就是这么发现的）。
+
+    不切分时原样返回，所以播放列表的分目录模板等既有行为完全不变。
+    """
+    if not (extras or {}).get("split_chapters"):
+        return template
+    stem, ext = os.path.splitext(template)
+    return {
+        "default": template,
+        "chapter": f"{stem} - %(section_number)03d - %(section_title).80B{ext or '.%(ext)s'}",
+    }
+
+
 def media_postprocessors(embed=None, extras=None, subtitles=False) -> list:
     """按 CLI 的顺序拼出完整后处理器列表（第 15 项）。
 
@@ -432,6 +450,14 @@ def _wrap_error(exc: Exception) -> DownloadError:
     if any(k in msg for k in ("geo", "region", "country", "地区", "区域",
                               "not available in your")):
         return DownloadError(i18n.tr("error_geo"))
+    # —— 后处理失败（合并/剪切/嵌入）——必须排在下面的「not found」之前：
+    # "ffprobe not found" 会命中那个分支，把后处理失败说成「视频不存在或已被删除」，
+    # 归因完全错误（真实下载验证时就是这么被误导的）。
+    if "Postprocessing" in msg or "PostProcessingError" in type(exc).__name__ \
+            or "ffprobe" in low:
+        if "ffprobe" in low:
+            return DownloadError(i18n.tr("error_ffprobe_missing"))
+        return DownloadError(i18n.tr("error_postprocessing", message=msg[:200]))
     if "Unsupported URL" in msg:
         return DownloadError(i18n.tr("error_unsupported_video_url"))
     if "is not a valid URL" in msg:
@@ -928,11 +954,14 @@ def download_video(
     opts.update(
         {
             "format": fmt,
-            "outtmpl": os.path.join(save_dir, "%(title).120B [%(id)s].%(ext)s"),
+            "outtmpl": with_chapter_template(
+                os.path.join(save_dir, "%(title).120B [%(id)s].%(ext)s"),
+                extras),
             "merge_output_format": "mp4",
             "progress_hooks": [
                 _make_progress_hook(progress, cancel_event, seen_files, pause_event)
             ],
+
         }
     )
     return _run_download_with_cookie_fallback(
@@ -1077,14 +1106,17 @@ def download_playlist(
     opts.update({
         "noplaylist": False,
         "format": fmt,
-        "outtmpl": _playlist_outtmpl(
-            os.path.join(save_dir, _safe_dirname(playlist_title)),
-            playlist_size_hint if playlist_size_hint is not None else playlist_total),
+        "outtmpl": with_chapter_template(
+            _playlist_outtmpl(
+                os.path.join(save_dir, _safe_dirname(playlist_title)),
+                playlist_size_hint if playlist_size_hint is not None else playlist_total),
+            extras),
         "merge_output_format": "mp4",
         "progress_hooks": [
             _make_progress_hook(progress, cancel_event, seen_files, pause_event,
                                 entry_progress, playlist_total)
         ],
+
     })
     selected = _clean_playlist_items(playlist_items)
     limit = int(playlist_limit or 0)

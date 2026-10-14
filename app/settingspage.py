@@ -19,15 +19,27 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from . import (about, applog, appupdate, browser_cookies, core, diagnostics, i18n,
-               images, menubar, netproxy, platforms, postaction, settings,
-               settings_io, taskbar, theme, ytdlp_update)
+from . import (about, applog, appupdate, browser_cookies, core, diagnostics,
+               ffmpeg_util, i18n, images, menubar, netproxy, platforms, postaction,
+               settings, settings_io, taskbar, theme, ytdlp_update)
 from .dialogs import SubtitleLanguagePicker
 
 # 限速与分片并发的候选值：界面显示的是标签（随语言变），存的是这里的数值。
 # 用选择器而不是文本框：省掉解析，也不可能存进非法值。
 RATELIMIT_CHOICES = (0, 256, 512, 1024, 2048)
 FRAGMENT_CHOICES = (1, 2, 4, 8)
+
+
+def chapters_hint_text():
+    """章节卡片的说明；没有 ffprobe 时补一句警告。
+
+    切分与剪切要靠 yt-dlp 的 _fixup_chapters 读时长，而那只内置 ffmpeg 的形态下没有
+    ffprobe。真实下载验证就是这么失败的——与其等下载到一半报错，不如提前说清楚。
+    """
+    text = i18n.tr("chapters_hint")
+    if not ffmpeg_util.has_ffprobe():
+        text += "　" + i18n.tr("chapters_need_ffprobe")
+    return text
 from .fspath import LOGO_OPTIONS, logo_icon_path, open_in_file_manager, open_path
 from .pages import PageHeader
 from .urlutil import PLATFORM_LABEL_KEYS
@@ -480,7 +492,7 @@ class SettingsPage(TFrame):
             values=[str(v) for v in FRAGMENT_CHOICES], font=f.f_btn, width=80)
         self.fragments_select.pack(side="left")
 
-        _pack_wrapped_hint(bch, app, i18n.tr("chapters_hint"), bg_role="CARD",
+        _pack_wrapped_hint(bch, app, chapters_hint_text(), bg_role="CARD",
                            pady=(8, 0))
         self._track_card("chapters", card_ch, bch)
         self._apply_download_limits(save=False)

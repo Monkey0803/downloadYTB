@@ -15,7 +15,7 @@ import types
 import unittest
 from unittest import mock
 
-from app import core, gui, i18n, settings as settings_mod, settingspage
+from app import core, ffmpeg_util, gui, i18n, settings as settings_mod, settingspage
 
 URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 
@@ -269,6 +269,55 @@ class ExtrasSettingsTests(unittest.TestCase):
 
     def test_sponsorblock_modes_match_the_engine(self):
         self.assertEqual(tuple(core.SPONSORBLOCK_MODES), ("off", "mark", "remove"))
+
+
+class FfprobeRequirementTests(unittest.TestCase):
+    """真实下载验证的结论：切分/剪切需要 ffprobe，界面必须提前说清楚。"""
+
+    def test_helper_detects_a_real_ffprobe(self):
+        import os
+        import tempfile
+
+        from app import ffmpeg_util
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_ffmpeg = os.path.join(tmp, "ffmpeg")
+            open(fake_ffmpeg, "w").close()
+            os.chmod(fake_ffmpeg, 0o755)
+            fake_ffprobe = os.path.join(tmp, "ffprobe")
+            open(fake_ffprobe, "w").close()
+            os.chmod(fake_ffprobe, 0o755)
+            with mock.patch.object(ffmpeg_util, "get_ffmpeg_path",
+                                   lambda: fake_ffmpeg):
+                self.assertTrue(ffmpeg_util.has_ffprobe())
+            os.unlink(fake_ffprobe)
+            with mock.patch.object(ffmpeg_util, "get_ffmpeg_path",
+                                   lambda: fake_ffmpeg):
+                self.assertEqual(ffmpeg_util.has_ffprobe(),
+                                 __import__("shutil").which("ffprobe") is not None)
+
+    def test_hint_warns_when_ffprobe_is_missing(self):
+        from app import ffmpeg_util
+
+        with mock.patch.object(ffmpeg_util, "has_ffprobe", lambda: False):
+            hinted = settingspage.chapters_hint_text()
+            self.assertIn(i18n.tr("chapters_need_ffprobe"), hinted)
+        with mock.patch.object(ffmpeg_util, "has_ffprobe", lambda: True):
+            self.assertNotIn(i18n.tr("chapters_need_ffprobe"),
+                             settingspage.chapters_hint_text())
+
+    def test_split_outtmpl_needs_a_chapter_key(self):
+        """只给字符串模板时每一章会写到同一个文件（真实下载验证发现的）。"""
+        template = "/tmp/out/%(title)s [%(id)s].%(ext)s"
+        self.assertEqual(core.with_chapter_template(template, None), template,
+                         "不切分时必须原样返回，播放列表的分目录模板靠这一点保持不变")
+        split = core.with_chapter_template(template, {"split_chapters": True})
+        self.assertIsInstance(split, dict)
+        self.assertEqual(split["default"], template)
+        self.assertIn("section_title", split["chapter"])
+        self.assertIn("section_number", split["chapter"])
+        self.assertTrue(split["chapter"].endswith(".%(ext)s"))
+        self.assertNotEqual(split["chapter"], split["default"])
 
 
 if __name__ == "__main__":

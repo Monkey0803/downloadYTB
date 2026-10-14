@@ -271,6 +271,19 @@ Three settings (`embed_subtitles`, `embed_thumbnail`, `embed_metadata`, all off)
   `_PostprocessLogger`, which forwards yt-dlp warnings/errors into the app log. Without that,
   yt-dlp does not even call the logger, and "I turned embedding on and nothing happened" is
   undiagnosable.
+- **Real downloads must be verified, not just the option lists.** Running the actual chapter split
+  once found two things unit tests could not: (1) `FFmpegSplitChaptersPP` names each chapter through
+  `prepare_filename(info, 'chapter')`, so with a plain **string** `outtmpl` every chapter was written
+  to the *same* path — no error, just silent overwriting and one surviving file; `with_chapter_template()`
+  now returns a dict with a `chapter` key (and returns the template untouched when not splitting, which
+  is what keeps the playlist folder template intact). (2) yt-dlp's `_fixup_chapters` reads the duration
+  with **ffprobe** when the last chapter has no `end_time`, and imageio-ffmpeg ships ffmpeg only — so
+  splitting/cutting **fail** on a machine without ffprobe (`Unable to determine video duration`).
+  Progress hooks and postprocessor hooks were both tried to inject the known duration: the info they
+  receive is not the object the postprocessors mutate, so they did not help and were removed.
+  Current behaviour: `ffmpeg_util.has_ffprobe()` drives a warning in the settings card, and the failure
+  is reported as what it is — `_wrap_error` no longer maps "ffprobe not found" onto 「视频不存在或已被删除」
+  (the old `"not found"` substring check did exactly that).
 - `mutagen` is required for mp3/m4a cover embedding and is **not** a yt-dlp dependency, so it is in
   `requirements.txt` and each build script passes `--hidden-import mutagen` (yt-dlp imports it
   lazily, so PyInstaller would otherwise drop it).
