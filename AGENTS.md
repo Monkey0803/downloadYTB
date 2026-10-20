@@ -123,6 +123,44 @@ Platform-only details must not leak into the product either:
 - `core.DEFAULT_SAVE_DIR` / `images.DEFAULT_SAVE_DIR` use `os.path.join`, not
   `expanduser("~/Downloads")`, which produced `C:\Users\x/Downloads` on Windows.
 
+### Live Downloads Actually Run On Windows
+
+The engine paths below were exercised against real sites on Windows (Python 3.14,
+yt-dlp 2026.08.19, ffmpeg + ffprobe paired on PATH), not just unit-tested. Keep the
+list honest — a path nobody has run stays unverified:
+
+- **Embedding metadata**: a YouTube video at 360p with `embed={"metadata": True}`
+  succeeded, and the recorded call was `ffmpeg_location_for_ytdlp(need_ffprobe=True)`
+  returning the PATH pair's **directory**. Note what this does *not* prove: YouTube's
+  API chapters always carry the last `end_time`, so `_fixup_chapters` never reached for
+  ffprobe there — the ffprobe-required case is covered by
+  `test_chapters.RealSplitNeedsFfprobeTests` (real ffmpeg, tiny local video).
+- **Chapter splitting + playlist folder template**: `download_playlist` with
+  `extras={"split_chapters": True}` produced every chapter file inside the playlist
+  folder (`<save dir>/<playlist>/01 - … - 001 - <chapter>.mp4`), and the same call
+  without extras kept the plain string template. Two traps this settled: the dict
+  template really does keep the folder layer, and yt-dlp's `FFmpegSplitChaptersPP`
+  **keeps the original merged file next to the chapter files** (it only deletes its
+  input when `force_keyframes` created one).
+- **SponsorBlock cut**: with a real `intro` segment, the output was 76.4s against an
+  expected 76.0s (79s source minus the 3s segment) — ffprobe read from the file, not
+  from the API's number.
+- **SponsorBlock mark**: this is where the missing `ModifyChapters` showed up; see the
+  Chapters section. Forcing the old shape (`ffmpeg_location` = the bundled ffmpeg
+  **file**) made the same download fail with the app's ffprobe message, which is the
+  negative control that the location switch is what makes it work.
+- **Images**: a Weibo GIF post (9 `.gif` + 9 `.mp4` in one call) and an X photo post
+  (4 `.jpg`) both downloaded through `probe_images` → `download_images` with no
+  cookies. Instagram is the one still unverified: the platform blocks anonymous
+  access, the app answers with its "Instagram 要求登录" message, and verifying it needs
+  a browser-cookie source selected by a human.
+
+Known limitation from that run: when chapters are split, `download_video` /
+`download_playlist` still return only the original merged file, so history and the
+status bar report one file while N chapter files sit in the folder. Listing them is not
+a one-liner — `panels.py` reads "more than one path" as "this was a playlist", so the
+returned list and that message have to change together.
+
 ### Verifying The Windows Installer
 
 `build/windows_installer.iss` can be compiled and exercised locally without admin
