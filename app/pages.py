@@ -199,7 +199,10 @@ class QueuePage(TFrame):
         self.autostart_var.set(self.app.queue_autostart_enabled())
         if not items:
             card = GlassCard(self.rows)
-            card.set_height(112)
+            # GlassCard 把 body 钉在「卡片高度 - 33」，112 只留下 79px，而
+            # 「标题 + 折行提示」需要 80px（Windows 字体度量下实测），差 1px
+            # 内容就会被裁掉。留出余量，别贴着内容高度设值（历史页同理）。
+            card.set_height(120)
             card.pack(fill="x")
             TLabel(card.body, text=i18n.tr("queue_empty"), font=self.app.f_section,
                    bg_role="CARD").pack(anchor="w")
@@ -327,7 +330,9 @@ class HistoryPage(TFrame):
 
     def _build_empty(self):
         card = GlassCard(self.rows)
-        card.set_height(112)
+        # 同上：112 让 body 只有 79px，内容要 80px（test_history 的
+        # test_empty_card_is_tall_enough 就是这条线）。
+        card.set_height(120)
         card.pack(fill="x")
         TLabel(card.body, text=i18n.tr("history_empty"), font=self.app.f_section,
                bg_role="CARD").pack(anchor="w")

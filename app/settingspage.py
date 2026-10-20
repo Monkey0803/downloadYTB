@@ -170,7 +170,11 @@ class SettingsPage(TFrame):
             sw.pack(side="left", padx=(0, 12))
             sw.set_selected(key == current)
             self._logo_swatches[key] = sw
-        TLabel(bl, text=i18n.tr("logo_hint"),
+        # Dock / Finder / .app 只在 macOS 上存在：其他平台换一套文案。
+        # 两个 key 都写成字面量，test_i18n 的静态扫描才能继续覆盖它们。
+        logo_hint = (i18n.tr("logo_hint") if sys.platform == "darwin"
+                     else i18n.tr("logo_hint_other"))
+        TLabel(bl, text=logo_hint,
                font=f.f_small, bg_role="CARD", fg_role="TEXT_SUB",
                anchor="w", justify="left").pack(anchor="w", fill="x", pady=(10, 0))
 
@@ -736,8 +740,12 @@ class SettingsPage(TFrame):
             self.cookie_status_label.set_fg_role("ERROR")
             self.cookie_status_label.configure(
                 text=i18n.tr("cookie_unreadable_status"))
-            self.cookie_fda_hint.configure(text=i18n.tr("cookie_fda_hint"))
-            # 只有 macOS 才有「完全磁盘访问权限」这一层，其他平台不加按钮
+            # 只有 macOS 才有「完全磁盘访问权限」这一层：其他平台连说明都不该出现。
+            # 之前是先无条件写文案、再由 _set_fda_row 收起整行——但那个分支只在
+            # 「按钮已经显示过」时才清空文案，于是 Windows 上第一次读取失败会让
+            # macOS 的设置路径留在界面上。
+            if sys.platform == "darwin":
+                self.cookie_fda_hint.configure(text=i18n.tr("cookie_fda_hint"))
             self._set_fda_row(sys.platform == "darwin")
         self._fit_cookie_card()
 

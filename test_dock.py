@@ -43,20 +43,30 @@ class _FakeApp:
         self.attention.append(kind)
 
 
-def _install_fake_appkit(active=False, app=None):
-    """把假 AppKit 注入 sys.modules，返回 (假 NSApplication, 还原函数)。"""
+def _install_fake_appkit(active=False, app=None, force_darwin=True):
+    """把假 AppKit 注入 sys.modules，返回 (假 NSApplication, 还原函数)。
+
+    ``force_darwin`` 同时把 ``dock.enabled_platform`` 固定为 True：这些用例验证
+    的是角标数值、完成弹跳与界面接线，不该因为在 Windows 上跑就整文件失败，
+    也不该被跳过——「宿主是不是 macOS」是另一件事，由
+    ``test_non_darwin_is_a_noop`` 单独覆盖。
+    """
     fake_app = app if app is not None else _FakeApp(active)
     module = types.ModuleType("AppKit")
     module.NSApp = lambda: fake_app          # PyObjC 的 NSApp 就是可调用的
     module.NSInformationalRequest = INFORMATIONAL
     original = sys.modules.get("AppKit")
     sys.modules["AppKit"] = module
+    original_enabled = dock.enabled_platform
+    if force_darwin:
+        dock.enabled_platform = lambda: True
 
     def restore():
         if original is None:
             sys.modules.pop("AppKit", None)
         else:
             sys.modules["AppKit"] = original
+        dock.enabled_platform = original_enabled
     return fake_app, restore
 
 
@@ -112,7 +122,7 @@ def test_clear_resets_badge():
 
 
 def test_non_darwin_is_a_noop():
-    fake_app, restore = _install_fake_appkit()
+    fake_app, restore = _install_fake_appkit(force_darwin=False)
     original_platform = sys.platform
     try:
         taskbar.sys.platform = "linux"
@@ -159,11 +169,16 @@ def test_app_gate_respects_setting_and_platform():
 
 
 def _fake_app_with_gate(dock_on=True):
-    """带真实开关逻辑的假 App（Mock 的自动属性会恒为真，必须显式绑定）。"""
+    """带真实开关逻辑的假 App（Mock 的自动属性会恒为真，必须显式绑定）。
+
+    与真实的 ``App.dock_status_enabled()`` 一致：设置项 + ``taskbar.enabled_platform()``
+    （Windows 上同一开关驱动任务栏进度，所以不能写成 ``dock.enabled_platform()``，
+    否则在非 macOS 上假件与真实现就不一致了）。
+    """
     app = Mock()
     app.settings = {"dock_status": dock_on}
     app.dock_status_enabled = lambda: (
-        bool(app.settings.get("dock_status", True)) and dock.enabled_platform())
+        bool(app.settings.get("dock_status", True)) and taskbar.enabled_platform())
     return app
 
 
@@ -217,9 +232,12 @@ def test_dock_toggle_handler_persists_and_clears():
     saved = {}
     original_save = settings_mod.save
     cleared = []
-    original_clear = dock.clear
+    # 界面走的是 taskbar（调度层），不是 dock 后端：在 macOS 上 taskbar 的
+    # dock 后端刚好转发给 dock.clear，但 Windows/Linux 后端不会，所以这里
+    # 必须打在真正的接缝上。
+    original_clear = gui.taskbar.clear
     settings_mod.save = lambda data: saved.update(data)
-    dock.clear = lambda: cleared.append(True)
+    gui.taskbar.clear = lambda **kw: cleared.append(True)
     try:
         page = Mock()
         page.app.settings = {}
@@ -235,7 +253,7 @@ def test_dock_toggle_handler_persists_and_clears():
         assert cleared == [True]        # 打开时不清
     finally:
         settings_mod.save = original_save
-        dock.clear = original_clear
+        gui.taskbar.clear = original_clear
 
 
 def test_real_appkit_nsapp_semantics():

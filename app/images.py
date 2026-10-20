@@ -26,7 +26,7 @@ from . import platforms
 from gallery_dl import config as gdl_config
 from gallery_dl import job as gdl_job
 
-DEFAULT_SAVE_DIR = os.path.expanduser("~/Downloads")
+DEFAULT_SAVE_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")

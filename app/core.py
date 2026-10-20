@@ -22,7 +22,10 @@ from . import netproxy
 from . import platforms
 from .ffmpeg_util import ffmpeg_location_for_ytdlp
 
-DEFAULT_SAVE_DIR = os.path.expanduser("~/Downloads")
+# 用 os.path.join 而不是 "~/Downloads"：Windows 上 expanduser 给的是
+# "C:\Users\x"，直接拼字符串会得到 "C:\Users\x/Downloads" 这种混合分隔符，
+# 能用但会原样显示在保存位置输入框里。
+DEFAULT_SAVE_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 
 # 仅音频模式可选的目标格式；flac 为无损，比特率对它无意义。
 AUDIO_FORMATS = ("mp3", "m4a", "opus", "flac")
@@ -263,7 +266,26 @@ def _js_runtimes() -> dict:
     return _js_runtimes_cache
 
 
-def _base_opts(with_cookies: bool = True, platform: Optional[str] = None) -> dict:
+def needs_ffprobe(embed=None, extras=None) -> bool:
+    """这次下载会不会走到「需要 ffprobe 的章节处理」。
+
+    会读时长的后处理器有两个：``FFmpegMetadataPP``（写章节元数据）与
+    ``FFmpegSplitChaptersPP``（按章节切分），它们都调 yt-dlp 的
+    ``_fixup_chapters``，而那只在**最后一段章节没有 end_time** 时才用 ffprobe 读
+    文件时长（YouTube 的 API 章节通常自带 end_time，所以平时看不出差别；描述里
+    解析出来的章节就会缺）。有没有这种章节要探测后才知道，所以这里按「会碰章节」
+    保守判断，让 ``ffmpeg_location_for_ytdlp(need_ffprobe=True)`` 提前把位置选对。
+    """
+    extras = dict(extras or {})
+    embed = dict(embed or {})
+    mode = str(extras.get("sponsorblock") or "off").strip().lower()
+    return (bool(extras.get("split_chapters"))
+            or mode not in ("", "off")
+            or bool(embed.get("metadata")))
+
+
+def _base_opts(with_cookies: bool = True, platform: Optional[str] = None,
+               need_ffprobe: bool = False) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -274,7 +296,7 @@ def _base_opts(with_cookies: bool = True, platform: Optional[str] = None) -> dic
         # 客户端组合（tv/web 等）能拿到全部档位且下载不会 403。
         "js_runtimes": _js_runtimes(),
     }
-    ffmpeg = ffmpeg_location_for_ytdlp()
+    ffmpeg = ffmpeg_location_for_ytdlp(need_ffprobe=need_ffprobe)
     if ffmpeg:
         opts["ffmpeg_location"] = ffmpeg
     if with_cookies:
@@ -937,7 +959,8 @@ def download_video(
         fmt = "bestvideo+bestaudio/best"
 
     seen_files: set = set()
-    opts = _base_opts(platform=platforms.detect(url))
+    opts = _base_opts(platform=platforms.detect(url),
+                      need_ffprobe=needs_ffprobe(embed, extras))
     embedding = embed or {}
     # 「嵌入字幕」本身就需要字幕文件，所以它也会打开字幕下载
     if subtitles or embedding.get("subtitles"):
@@ -1092,7 +1115,8 @@ def download_playlist(
     seen_files: set = set()
     collected: List[str] = []
     info_out: List[dict] = []
-    opts = _base_opts(platform=platforms.detect(url))
+    opts = _base_opts(platform=platforms.detect(url),
+                      need_ffprobe=needs_ffprobe(embed, extras))
     embedding = embed or {}
     if subtitles or embedding.get("subtitles"):
         opts.update(subtitle_options(subtitle_langs))

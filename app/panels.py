@@ -205,7 +205,9 @@ class VideoPanel(TFrame):
 
         # —— 卡片 3：保存位置 ——
         card3 = GlassCard(self)
-        card3.set_height(102)
+        # 102 只让 body 有 69px，而「保存位置」标签 + 目录行在 Windows 的字体
+        # 度量下需要 72px，底部会被裁掉 3px。留出余量，别贴着内容高度设值。
+        card3.set_height(110)
         card3.pack(fill="x", pady=(0, 14))
         b3 = card3.body
         TLabel(b3, text=i18n.tr("save_location"), font=f.f_section, bg_role="CARD",
@@ -1013,7 +1015,13 @@ class ImagePanel(TFrame):
     RESOURCE_CARD_MIN_HEIGHT = 180
     RESOURCE_CARD_MAX_HEIGHT = 322
     RESOURCE_CARD_RESERVED_HEIGHT = 342
-    PICKER_CHROME_HEIGHT = 96
+    # GlassCard 把内部 body 钉在「卡片高度 - 33」（见 widgets.GlassCard._redraw），
+    # 而卡片里除选择器以外的部分（标题 + 提示 + 间距）实测要 64px。旧写法直接用
+    # 「卡片高度 - 96」，两个常数各算各的，差 1px 就会让选择器底部被裁掉一条
+    # （Windows 的字体度量下实测 body 192px，内容需要 193px）。这里按 body 反推，
+    # 再留 1px 余量。
+    GLASS_BODY_PADDING = 33
+    PICKER_CHROME_HEIGHT = 64
     PICKER_MIN_HEIGHT = 80
 
     def __init__(self, master, app, platform="x", on_redirect=None):
@@ -1142,7 +1150,9 @@ class ImagePanel(TFrame):
         self._resource_card_height = card_height
         self.selection_card.set_height(card_height)
         self.picker.canvas.configure(height=max(
-            self.PICKER_MIN_HEIGHT, card_height - self.PICKER_CHROME_HEIGHT))
+            self.PICKER_MIN_HEIGHT,
+            card_height - self.GLASS_BODY_PADDING
+            - self.PICKER_CHROME_HEIGHT - 1))
 
     # ---------- 状态栏 ----------
 

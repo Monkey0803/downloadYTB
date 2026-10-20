@@ -9,6 +9,7 @@ ASCII 护栏——Inno 各版本对 .iss 的编码处理不一致，非 ASCII �
 """
 
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -22,6 +23,9 @@ import sys
 
 sys.path.insert(0, str(BUILD))
 import desktop_entry  # noqa: E402
+
+# 真跑 Linux 安装脚本需要 POSIX sh；Windows 上没有（Git 自带的不在 PATH 里）。
+POSIX_SHELL = shutil.which("sh")
 
 
 def _fake_bundle(base: str, name: str = "My Apps") -> str:
@@ -88,8 +92,14 @@ class DesktopEntryTests(unittest.TestCase):
                           desktop)
 
 
+@unittest.skipUnless(POSIX_SHELL, "需要 POSIX sh 才能真跑安装脚本（Windows 上跳过）")
 class LinuxInstallRunTests(unittest.TestCase):
-    """真跑安装脚本（在临时 HOME 里），不是一个字符一个字符地比字符串。"""
+    """真跑安装脚本（在临时 HOME 里），不是一个字符一个字符地比字符串。
+
+    这一组必须真的执行 ``sh install-desktop.sh``：Windows 上没有 ``sh``（Git 自带
+    的那份也不在 PATH 里），所以整组跳过。上个版本没跳过，于是 Windows 上五个
+    用例全部以 FileNotFoundError 报错——那是环境差异，不是安装脚本的问题。
+    """
 
     def test_install_puts_the_entry_and_icon_in_place(self):
         with tempfile.TemporaryDirectory() as tmp:

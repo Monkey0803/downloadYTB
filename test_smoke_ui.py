@@ -1,6 +1,7 @@
 """冒烟测试：启动新版 sidebar UI，逐页截图后退出。"""
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -9,6 +10,9 @@ from app import gui
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "screenshots")
 os.makedirs(OUT, exist_ok=True)
+
+# 截图只是附带产出；没有 screencapture（Windows / Linux）时跳过截图继续走流程。
+_CAPTURE = shutil.which("screencapture")
 
 # 清空剪贴板影响：smoke 阶段不希望自动解析
 app = gui.App()
@@ -20,12 +24,19 @@ except Exception:
 
 
 def shot(name):
+    if not _CAPTURE:
+        # 非 macOS 没有 screencapture：跳过截图但继续跑。直接让 subprocess 抛
+        # FileNotFoundError 会更糟——异常发生在 after() 回调里会被 Tk 吞掉，
+        # 负责 destroy 的那一步永远排不到，mainloop 再也不返回。
+        print("shot skipped (no screencapture):", name)
+        return None
     app.update_idletasks()
     x, y = app.winfo_rootx(), app.winfo_rooty()
     w, h = app.winfo_width(), app.winfo_height()
     path = os.path.join(OUT, name)
     subprocess.run(["screencapture", "-x", f"-R{x - 4},{y - 34},{w + 8},{h + 40}", path])
     print("shot:", path)
+    return path
 
 
 STEPS = [

@@ -171,6 +171,8 @@ T = {
     "sunset": {"zh_CN": "日落", "zh_TW": "日落", "en": "Sunset", "ko": "선셋", "ja": "サンセット"},
     "mint": {"zh_CN": "薄荷", "zh_TW": "薄荷", "en": "Mint", "ko": "민트", "ja": "ミント"},
     "logo_hint": {"zh_CN": "Dock 与窗口图标立即生效，Finder 中 .app 的图标保持默认。", "zh_TW": "Dock 與視窗圖示立即生效，Finder 中 .app 的圖示保持預設。", "en": "The Dock and window icons update immediately; the Finder .app icon remains unchanged.", "ko": "Dock과 창 아이콘은 즉시 적용되며 Finder의 .app 아이콘은 기본값으로 유지됩니다.", "ja": "Dockとウィンドウのアイコンはすぐに反映されます。Finderの.appアイコンは変更されません。"},
+    # 非 macOS 上没有 Dock / Finder / .app，说明文案必须换一套（按 sys.platform 选）
+    "logo_hint_other": {"zh_CN": "窗口图标与任务栏图标立即生效。", "zh_TW": "視窗圖示與工作列圖示立即生效。", "en": "The window and taskbar icons update immediately.", "ko": "창 아이콘과 작업 표시줄 아이콘이 즉시 적용됩니다.", "ja": "ウィンドウとタスクバーのアイコンはすぐに反映されます。"},
     "default_save": {"zh_CN": "默认保存位置（各下载方式未单独设置时使用）", "zh_TW": "預設儲存位置（各下載方式未單獨設定時使用）", "en": "Default Save Location (used when a mode has no dedicated directory)", "ko": "기본 저장 위치 (다운로드 방식별 폴더가 없을 때 사용)", "ja": "デフォルト保存先（個別設定がないダウンロード方式で使用）"},
     "browser_cookie": {"zh_CN": "浏览器 Cookie（用于需要登录的内容）", "zh_TW": "瀏覽器 Cookie（用於需要登入的內容）", "en": "Browser Cookies (for content requiring login)", "ko": "브라우저 쿠키 (로그인이 필요한 콘텐츠용)", "ja": "ブラウザ Cookie（ログインが必要なコンテンツ用）"},
     "no_cookie": {"zh_CN": "不使用", "zh_TW": "不使用", "en": "Do not use", "ko": "사용 안 함", "ja": "使用しない"},

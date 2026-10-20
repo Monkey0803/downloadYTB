@@ -16,10 +16,19 @@ APP_VERSION="$($PYTHON -c 'from app import __version__; print(__version__)')"
 
 # 冻结包运行期读不到 yt_dlp 的 version.py（代码在归档里，路径是假的），
 # 所以把内置版本号写成一个文件一起打进去，界面与诊断才能显示真实版本。
+# 写不出来就**直接失败**：旧写法是 `... > file || printf '' > file`，失败时
+# 故意写一个空文件继续打包，于是发布包里的版本号是空的（关于对话框与诊断里
+# 会显示空版本，真机上出现过）。
 mkdir -p build/work
-"$PYTHON" -c 'import yt_dlp.version; print(yt_dlp.version.__version__)' \
-    > build/work/yt_dlp_bundled_version.txt \
-    || printf '' > build/work/yt_dlp_bundled_version.txt
+if ! "$PYTHON" -c 'import yt_dlp.version; print(yt_dlp.version.__version__)' \
+        > build/work/yt_dlp_bundled_version.txt; then
+    echo "无法读取 yt-dlp 版本，打包中止" >&2
+    exit 1
+fi
+if [ ! -s build/work/yt_dlp_bundled_version.txt ]; then
+    echo "yt-dlp 版本文件是空的，打包中止" >&2
+    exit 1
+fi
 
 "$PYTHON" -m PyInstaller \
     --noconfirm \

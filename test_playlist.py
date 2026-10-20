@@ -321,7 +321,8 @@ class PlaylistNamingTests(unittest.TestCase):
         ydl = yt_dlp.YoutubeDL({"outtmpl": tmpl, "quiet": True})
         name = ydl.prepare_filename(
             {"title": "TED Talk", "id": "abc", "ext": "mp4", "playlist_index": 7})
-        self.assertEqual(name.split("/")[-1], "007 - TED Talk [abc].mp4")
+        # 用 basename 而不是 split("/")：Windows 上 os.path.join 给的是反斜杠
+        self.assertEqual(os.path.basename(name), "007 - TED Talk [abc].mp4")
 
     def test_missing_index_does_not_become_na(self):
         """不加 |0 兜底时 yt-dlp 会填 "NA"，文件名会很难看。"""
@@ -329,7 +330,7 @@ class PlaylistNamingTests(unittest.TestCase):
         tmpl = core._playlist_outtmpl("/tmp/x", 25)
         ydl = yt_dlp.YoutubeDL({"outtmpl": tmpl, "quiet": True})
         name = ydl.prepare_filename({"title": "T", "id": "i", "ext": "mp4"})
-        self.assertTrue(name.split("/")[-1].startswith("0 - "), name)
+        self.assertTrue(os.path.basename(name).startswith("0 - "), name)
 
     def test_outtmpl_used_by_download_playlist(self):
         captured = {}

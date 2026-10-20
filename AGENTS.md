@@ -58,6 +58,100 @@ and a stale callback then raises `TclError: bad window path name`.
 
 GUI scripts such as `test_smoke_ui.py` require Tk; `test_core.py`, `test_images.py`, `test_pause.py` (pause/resume against a real video), and several GUI flows use live services and may require valid URLs, login cookies, and network access. Use a dedicated test download directory and never include private URLs or cookies in fixtures.
 
+### Running The Suite On Windows
+
+Verified on real Windows 11 (22631) with Python 3.14: the app, the frozen
+PyInstaller build, and the engine all work, and the offline suite is green there.
+Five platform differences are baked into the tests, so do not "simplify" them away:
+
+- `test_dock.py` pins `dock.enabled_platform` to True around its fake AppKit
+  (`force_darwin=False` only for `test_non_darwin_is_a_noop`) — the badge and
+  bounce cases are about the logic, not about which host they run on. It also
+  patches `gui.taskbar.clear`, not `dock.clear`: the settings toggle goes through
+  the taskbar dispatcher, which on macOS happens to forward to `dock` but on
+  Windows/Linux does not.
+- `test_save_dir_sync.py` and `test_smoke_ui.py` skip their screenshots when
+  `shutil.which("screencapture")` is None. Letting the call raise instead is a
+  trap: `FileNotFoundError` inside an `after()` callback is swallowed by Tk, the
+  step that schedules `destroy` never runs, and `mainloop()` never returns — the
+  file hangs instead of failing. The other `test_*_shots.py` / `test_*_flow.py`
+  scripts still need macOS; give them the same guard if you run them there.
+- `LinuxInstallRunTests` in `test_installers.py` is skipped without a POSIX `sh`,
+  because it really executes `install-desktop.sh`. Its Windows half (the `.iss`
+  checks) runs everywhere and is what guards the installer.
+- Name and path details: Windows environment variables are case-insensitive
+  (`test_proxy.py` detects that and picks the spelling that actually takes
+  effect), and `test_playlist.py` compares `os.path.basename` because
+  `os.path.join` yields `\` on Windows.
+- Windows font metrics and an unmapped window: `_refresh_status_text()` falls
+  back to "show it all, no hand cursor" while `winfo_width()` is 1, so
+  `test_status_detail.py` pins the label width to test truncation
+  deterministically. Card heights are the other half: Windows metrics need 1–3px
+  more than macOS for the same content, so the history *and* queue empty cards are
+  120 (not 112, which pinned the body to 79 against 80 needed), the video panel's
+  save-location card is 110 (not 102 → 69 against 72), and the image picker is
+  sized from the body height (`card_height - 33 - 64 - 1`) instead of
+  `card_height - 96`, whose two independently chosen constants were 1px apart.
+
+Platform-only details must not leak into the product either:
+
+- `ffmpeg_util.has_ffprobe()` answers "can **yt-dlp** actually use an ffprobe", not
+  "is ffprobe installed". We hand yt-dlp the bundled ffmpeg as a **file** path, and
+  yt-dlp only looks for ffprobe in that file's directory (PATH is not consulted;
+  verified with `FFmpegPostProcessor.probe_available`). So exactly two shapes
+  count: `ffprobe` / `ffprobe.exe` next to our ffmpeg, or a **pair** of
+  ffmpeg + ffprobe on PATH. A lone `ffprobe` on PATH does not count.
+- Consequence in `ffmpeg_location_for_ytdlp(need_ffprobe=…)`: when the download
+  will touch chapters (`core.needs_ffprobe()` — split chapters, SponsorBlock, or
+  metadata embedding), a PATH **directory** containing both binaries is handed
+  over so yt-dlp can find ffprobe; every other download keeps the bundled static
+  ffmpeg. Do not "simplify" this back to always passing one location: with the
+  bundled file path alone, a machine with a perfectly good ffmpeg/ffprobe install
+  fails chapter splitting with `Unable to determine video duration: ffprobe not
+  found` while the settings card shows no warning at all.
+- `test_chapters.py`'s `RealSplitNeedsFfprobeTests` is the only test that catches
+  that: YouTube's API chapters always carry the last `end_time`, so `_fixup_chapters`
+  never reaches for ffprobe — the test builds a tiny local video and leaves the last
+  chapter without `end_time` on purpose. It skips when no ffprobe is usable (the
+  packaged default), and it runs offline.
+- `ffprobe` on Windows is `ffprobe.exe`; Windows `CreateProcess` appends `.exe`, so
+  yt-dlp does run a file named `ffprobe.exe` (verified with `_get_exe_version_output`).
+- `logo_hint` (Dock/Finder/.app) is macOS-only wording, so the settings page swaps
+  in `logo_hint_other` elsewhere, and the Full Disk Access hint is not written at
+  all off macOS (`_set_fda_row` alone was not enough — it only clears the text
+  when the button had been shown).
+- `core.DEFAULT_SAVE_DIR` / `images.DEFAULT_SAVE_DIR` use `os.path.join`, not
+  `expanduser("~/Downloads")`, which produced `C:\Users\x/Downloads` on Windows.
+
+### Verifying The Windows Installer
+
+`build/windows_installer.iss` can be compiled and exercised locally without admin
+rights: install Inno Setup 6 in portable mode (`innosetup-6.7.3.exe /VERYSILENT
+/SUPPRESSMSGBOXES /NORESTART /SP- /PORTABLE=1 /DIR=<dir>`), then
+
+~~~bat
+ISCC.exe /DAppVersion=1.12.0 build\windows_installer.iss
+dist\VideoDownloader-1.12.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=<tmp>
+<tmp>\VideoDownloader.exe          REM 用 VD_TEST_SCRIPT 跑一遍
+<tmp>\unins000.exe /VERYSILENT
+~~~
+
+The silent install needs no UAC (`PrivilegesRequired=lowest`) and the uninstall leaves
+no directory, Start Menu group or desktop shortcut behind. The installed exe is
+byte-identical to `dist\VideoDownloader\VideoDownloader.exe`, and the installed copy
+runs with its own `_internal` tree (that is what `recursesubdirs` in the `[Files]`
+section buys — without it the installed app cannot start). test_installers.py only
+checks the `.iss` text, so this is the step that actually proves the installer.
+
+### The Bundled yt-dlp Version File
+
+The three build scripts write `yt_dlp_bundled_version.txt` and **abort if it comes
+out empty**. Do not go back to the shell redirection form (`python -c ... > file
+2>nul`, or `... > file || printf '' > file` in the `.sh` scripts): it hides the
+failure and ships a 0-byte file, and the frozen app then reports an empty yt-dlp
+version in About, the settings card and the diagnostics report. That was observed
+once on a real Windows build before the guard existed.
+
 ## Where The Code Lives (And Where Tests Must Stub It)
 
 `gui.py` was split (ROADMAP item 13) by moving whole units out and re-importing their names:
@@ -599,6 +693,10 @@ Three things learned by getting them wrong, all inside this repository:
 - Write a marker line at **module level** and wrap every `after()`-scheduled function in a
   try/except that records the traceback into the output file. Twice a smoke run produced an empty
   file because the real error happened inside a callback, and Tk swallowed it.
+- The exec namespace is exactly `{"app": app}`: **`__file__` does not exist there**. Referencing
+  it at module level raises `NameError` before the marker line is written, and `run()` swallows
+  that too — the window comes up and the output file stays empty. Take output paths from an
+  environment variable instead.
 - Use `launchctl setenv` (a plain `open` does not pass environment variables) and `open -n`, so a
   stale already-running instance without the script cannot be reactivated instead.
 - Smoke scripts must neutralise `settings.save` (or restore the file) — a verification run that

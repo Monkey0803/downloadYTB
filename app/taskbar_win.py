@@ -3,17 +3,23 @@
 为什么手写 COM：仓库现有依赖里没有 pywin32 / comtypes，而 ITaskbarList3
 的 vtable 顺序是固定 ABI，直接用 ctypes 拼出来比新增依赖更可控。
 
-诚实说明：本文件在 macOS 上开发，**没有在真实 Windows 上运行验证过**。
-因此所有逻辑都通过 ``_load_api()`` 这一层可注入的接口表达，单元测试用假件
-覆盖「百分比换算、状态迁移、HWND 上溯、失败静默」等逻辑；真正调用 COM 的
-那部分（_WinApi）只能靠代码审查，这一点必须如实告知使用者。
+诚实说明：本文件在 macOS 上开发；2026-08 已在真实 Windows 11（22631）上用
+真实 Tk 窗口跑通完整链路——取 HWND、上溯顶层窗口、CoCreateInstance 拿
+ITaskbarList3、SetProgressState/SetProgressValue/FlashWindowEx 都不抛异常。
+未验证的部分：Windows 10 与其它语言/主题下的观感只能靠代码审查。
+
+IID 必须与 Windows SDK 的 ShObjIdl_core.h 完全一致，否则
+CoCreateInstance 直接返回 E_NOINTERFACE（0x80004002），而调度层会把异常
+吞掉——表现就是「任务栏进度永远不出现」，且没有任何报错可查。第一次真机
+验证就踩到了这个坑：当时结尾写的是 ...5eea84，SDK 里是 ...5eefaf。
+这个 IID 字面量由 test_taskbar.py 的 WinComIidTests 钉住，防止再次手抄错。
 """
 
 import sys
 
 # COM 常量
 CLSID_TASKBAR_LIST = "{56FDF344-FD6D-11d0-958A-006097C9A090}"
-IID_TASKBAR_LIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5EEA84}"
+IID_TASKBAR_LIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5EEFAF}"
 
 CLSCTX_INPROC_SERVER = 0x1
 COINIT_APARTMENTTHREADED = 0x2

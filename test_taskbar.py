@@ -1,9 +1,13 @@
 """任务栏 / Dock 进度：调度层与 Windows、Linux 后端。
 
-**必须如实说明的边界**：Windows 与 Linux 后端是在 macOS 上开发的，无法在这里
-真机运行。下面用假件覆盖的是「纯逻辑」部分——百分比换算、状态迁移、HWND 上溯、
-节流、失败静默。真正调用 COM / D-Bus 的那几行只能靠代码审查，单测覆盖不到，
-所以不能据此声称「已在 Windows / Linux 上验证通过」。
+**必须如实说明的边界**：下面用假件覆盖的是「纯逻辑」部分——百分比换算、
+状态迁移、HWND 上溯、节流、失败静默。真正调用 COM / D-Bus 的那几行单测
+覆盖不到。
+
+Windows 侧已在真实 Windows 11（22631）上补过一次真机验证（真实 Tk 窗口 +
+真实 ITaskbarList3，跑完整链路），并因此修掉了 IID_TASKBAR_LIST3 的手抄错误；
+WinComIidTests 就是那次事故的回归测试。
+Linux 侧仍未真机验证，不能声称「已在 Linux 上验证通过」。
 """
 
 import os
@@ -114,6 +118,31 @@ class WindowsBackendTests(unittest.TestCase):
         finally:
             taskbar.sys.platform = original
             taskbar.reset_backend()
+
+
+class WinComIidTests(unittest.TestCase):
+    """IID / CLSID 字面量必须与 Windows SDK 一致。
+
+    这是一次真机事故的回归测试：仓库里的 IID_TASKBAR_LIST3 结尾写成了
+    ``...5eea84``，而 Windows SDK（ShObjIdl_core.h，19041/22621/26100 三份
+    都一样）是 ``...5eefaf``。CoCreateInstance 因此返回 E_NOINTERFACE，
+    而调度层按设计吞掉异常，症状就是「任务栏进度永远不出现、也不报错」。
+    假件测试全绿，只有真机上才暴露，所以这里把字面量抄成期望值钉住。
+    """
+
+    def test_iid_matches_windows_sdk(self):
+        self.assertEqual(taskbar_win.IID_TASKBAR_LIST3.upper(),
+                         "{EA1AFB91-9E28-4B86-90E9-9E9F8A5EEFAF}")
+
+    def test_clsid_matches_windows_sdk(self):
+        self.assertEqual(taskbar_win.CLSID_TASKBAR_LIST.upper(),
+                         "{56FDF344-FD6D-11D0-958A-006097C9A090}")
+
+    def test_iids_are_parseable_guids(self):
+        import uuid
+        for text in (taskbar_win.IID_TASKBAR_LIST3,
+                     taskbar_win.CLSID_TASKBAR_LIST):
+            self.assertEqual(str(uuid.UUID(text)).upper(), text.strip("{}").upper())
 
 
 class WinHwndWalkTests(unittest.TestCase):

@@ -13,6 +13,10 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "screenshots")
 os.makedirs(OUT, exist_ok=True)
 
+# 截图只是附带产出，真正要验证的是保存位置同步与持久化；
+# 没有 screencapture（Windows / Linux）时整段跳过，见 shot()。
+_CAPTURE = shutil.which("screencapture")
+
 TMP = tempfile.mkdtemp(prefix="vd_save_dir_test_")
 SETTINGS_FILE = os.path.join(TMP, "settings.json")
 
@@ -32,6 +36,11 @@ os.makedirs(OTHER_DIR, exist_ok=True)
 
 
 def shot(app, name):
+    if not _CAPTURE:
+        # 非 macOS 没有 screencapture：跳过截图但继续跑。直接让 subprocess 抛
+        # FileNotFoundError 会更糟——异常发生在 after() 回调里会被 Tk 吞掉，
+        # 负责 destroy 的那一步永远排不到，mainloop 再也不返回。
+        return None
     app.update_idletasks()
     x, y = app.winfo_rootx(), app.winfo_rooty()
     w, h = app.winfo_width(), app.winfo_height()

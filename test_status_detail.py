@@ -68,12 +68,30 @@ class StatusDetailTests(unittest.TestCase):
     # ---------- 截断提示 ----------
 
     def test_cursor_hint_only_when_truncated(self):
-        self.video.status_label.configure(text="")
+        # 这里的窗口从未映射，winfo_width() 返回 1，代码会走「原样显示、不加
+        # 手型光标」的兜底分支（见 _refresh_status_text）。把宽度钉死，才能
+        # 确定性地验证真正要守的行为：装不下就截断并给出手型提示。
+        label = self.video.status_label
         self.video._status_full = (LONG_ERROR, None)
-        self.video._refresh_status_text()
-        self.app.update_idletasks()
-        self.assertTrue(self.video.status_label.cget("cursor") != "" or
-                        len(self.video.status_label.cget("text")) < len(LONG_ERROR))
+
+        shown_narrow, cursor_narrow = self._refresh_with_width(label, 200)
+        self.assertNotEqual(cursor_narrow, "", "被截断时必须给出手型光标")
+        self.assertLess(len(shown_narrow), len(LONG_ERROR), "长错误应被截断")
+
+        # 反过来：装得下就原样显示，也不显示可点击提示
+        shown_wide, cursor_wide = self._refresh_with_width(label, 4000)
+        self.assertEqual(shown_wide, LONG_ERROR)
+        self.assertEqual(cursor_wide, "")
+
+    def _refresh_with_width(self, label, width):
+        """把 label 的可见宽度临时固定成 ``width`` 后刷新一次状态栏。"""
+        label.configure(text="")
+        label.winfo_width = lambda: width
+        try:
+            self.video._refresh_status_text()
+            return label.cget("text"), label.cget("cursor")
+        finally:
+            del label.winfo_width
 
     # ---------- 弹窗本体 ----------
 

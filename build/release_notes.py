@@ -146,7 +146,7 @@ def read_git_log(previous, current):
     fmt = f"%s{FIELD}%b{RECORD}"
     args = ["git", "log", f"--format={fmt}", "--no-merges"]
     args.append(f"{previous}..{current}" if previous else current)
-    proc = subprocess.run(args, capture_output=True, text=True)
+    proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         raise RuntimeError(f"git log 失败：{proc.stderr.strip()}")
     return proc.stdout
@@ -155,7 +155,7 @@ def read_git_log(previous, current):
 def latest_tag(pattern="v*"):
     """当前 HEAD 可达的最新标签。"""
     proc = subprocess.run(["git", "describe", "--tags", "--abbrev=0", "--match", pattern],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
@@ -177,7 +177,7 @@ def _pick_previous(tags, current):
 def previous_tag(current, pattern="v*"):
     """比 current 早的最近一个标签（按版本号排序，不按提交时间）。"""
     proc = subprocess.run(["git", "tag", "--sort=-v:refname", "--list", pattern],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         return ""
     tags = [t.strip() for t in proc.stdout.splitlines() if t.strip()]
@@ -293,7 +293,7 @@ def main(argv=None):
 
     if previous:
         check = subprocess.run(["git", "rev-parse", "--verify", f"{previous}^{{commit}}"],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, encoding="utf-8")
         if check.returncode != 0:
             print(f"警告：找不到上一个标签 {previous}（浅克隆？），改为列出全部提交",
                   file=sys.stderr)

@@ -24,6 +24,20 @@ _ENV_KEYS = netproxy.ENV_KEYS
 _APP = None
 
 
+def _env_names_are_case_insensitive() -> bool:
+    """Windows 的环境变量名大小写不敏感，POSIX 上不是。"""
+    probe = "VD_PROXY_CASE_PROBE"
+    os.environ[probe] = "1"
+    try:
+        return probe.lower() in os.environ
+    finally:
+        os.environ.pop(probe, None)
+        os.environ.pop(probe.lower(), None)
+
+
+_ENV_CASE_INSENSITIVE = _env_names_are_case_insensitive()
+
+
 def _shared_app():
     global _APP
     if _APP is None:
@@ -117,10 +131,16 @@ class PriorityTests(_CleanProxyCase):
         self.assertEqual(netproxy.env_proxy(), "http://all:3")
         os.environ["HTTP_PROXY"] = "http://http:2"
         self.assertEqual(netproxy.env_proxy(), "http://http:2")
-        os.environ["https_proxy"] = "http://lower:1"
-        self.assertEqual(netproxy.env_proxy(), "http://lower:1")
+        # 大小写不敏感的平台（Windows）只能用一个名字：HTTPS_PROXY 与
+        # https_proxy 是同一个变量，同时设只会互相覆盖。换一个真正生效的
+        # 名字，断言的仍然是「HTTPS 优先于 HTTP」这条优先级。
+        name = "HTTPS_PROXY" if _ENV_CASE_INSENSITIVE else "https_proxy"
+        os.environ[name] = "http://lower:1"
+        self.assertEqual(netproxy.env_proxy(), "http://lower:1", "HTTPS 优先于 HTTP")
         os.environ["HTTPS_PROXY"] = "垃圾值"
-        self.assertEqual(netproxy.env_proxy(), "http://lower:1", "非法环境变量应跳过")
+        # 大小写不敏感时这一步覆盖的就是上面那个变量，于是回落到 HTTP_PROXY
+        expected = "http://http:2" if _ENV_CASE_INSENSITIVE else "http://lower:1"
+        self.assertEqual(netproxy.env_proxy(), expected, "非法环境变量应跳过")
 
     def test_no_proxy_anywhere_means_direct(self):
         self.assertEqual(netproxy.set_from_settings({}), "")
