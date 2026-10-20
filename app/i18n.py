@@ -282,16 +282,17 @@ T = {
     "ratelimit_unlimited": {"zh_CN": '不限', "zh_TW": '不限', "en": 'No limit', "ko": '제한 없음', "ja": '制限なし'},
     "fragment_workers": {"zh_CN": '分片并发', "zh_TW": '分片並行', "en": 'Fragment threads', "ko": '조각 동시성', "ja": 'フラグメント並列'},
     "chapters_need_ffprobe": {
-        "zh_CN": "注意：当前没有可用的 ffprobe，按章节切分与 SponsorBlock 剪切会失败。"
+        "zh_CN": "注意：当前没有可用的 ffprobe，按章节切分与 SponsorBlock（剪切与标记）会失败。"
                  "装上 ffmpeg 与 ffprobe（两者放同一目录并在 PATH 里）后即可使用。",
-        "zh_TW": "注意：目前沒有可用的 ffprobe，依章節切分與 SponsorBlock 剪裁會失敗。"
+        "zh_TW": "注意：目前沒有可用的 ffprobe，依章節切分與 SponsorBlock（剪裁與標記）會失敗。"
                  "裝上 ffmpeg 與 ffprobe（兩者放同一目錄並在 PATH 裡）後即可使用。",
-        "en": "Note: no ffprobe is available, so chapter splitting and SponsorBlock cutting "
-              "will fail. Install ffmpeg and ffprobe together on your PATH to use them.",
-        "ko": "주의: 사용할 수 있는 ffprobe가 없어 챕터 분할과 SponsorBlock 자르기가 실패합니다. "
-              "ffmpeg와 ffprobe를 같은 위치에 두고 PATH에 추가하면 사용할 수 있습니다.",
-        "ja": "注意：利用できる ffprobe がないため、チャプター分割と SponsorBlock の切り取りは"
-              "失敗します。ffmpeg と ffprobe を同じ場所に置いて PATH に通すと使えます。"},
+        "en": "Note: no ffprobe is available, so chapter splitting and SponsorBlock "
+              "(cutting and marking) will fail. Install ffmpeg and ffprobe together on your "
+              "PATH to use them.",
+        "ko": "주의: 사용할 수 있는 ffprobe가 없어 챕터 분할과 SponsorBlock(자르기 및 표시)이 "
+              "실패합니다. ffmpeg와 ffprobe를 같은 위치에 두고 PATH에 추가하면 사용할 수 있습니다.",
+        "ja": "注意：利用できる ffprobe がないため、チャプター分割と SponsorBlock（切り取り・"
+              "マーク）は失敗します。ffmpeg と ffprobe を同じ場所に置いて PATH に通すと使えます。"},
     "chapters_hint": {"zh_CN": '切分只在视频本身带章节时才有结果；SponsorBlock 每次下载会先联网查询标记，「剪掉」会用 ffmpeg 重新剪切（对齐关键帧，不重新编码）。限速与分片并发只作用于 yt-dlp 的下载（视频/音频），图片走另一条通道。', "zh_TW": '切分只在影片本身帶章節時才有結果；SponsorBlock 每次下載會先連網查詢標記，「剪掉」會用 ffmpeg 重新剪切（對齊關鍵影格，不重新編碼）。限速與分片並行只作用於 yt-dlp 的下載（影片/音訊），圖片走另一條通道。', "en": 'Splitting only produces files when the video itself has chapters. SponsorBlock queries the API on every download; “Cut out” re-cuts with ffmpeg (keyframe aligned, no re-encode). The rate limit and fragment threads only apply to yt-dlp downloads (video/audio); images use a separate path.', "ko": '분할은 영상 자체에 챕터가 있을 때만 결과가 생깁니다. SponsorBlock은 다운로드마다 API를 조회하고, “잘라내기”는 ffmpeg로 다시 자릅니다(키프레임 정렬, 재인코딩 없음). 속도 제한과 조각 동시성은 yt-dlp 다운로드(영상/오디오)에만 적용되고 이미지는 별도 경로를 씁니다.', "ja": '分割は動画自体にチャプターがある場合のみ結果が出ます。SponsorBlock は毎回 API に問い合わせ、「切り取り」は ffmpeg で切り直します（キーフレーム単位、再エンコードなし）。速度制限とフラグメント並列は yt-dlp のダウンロード（映像/音声）にのみ作用し、画像は別経路です。'},
     "settings_io_card": {"zh_CN": '设置导入导出', "zh_TW": '設定匯入匯出', "en": 'Import / export settings', "ko": '설정 가져오기/내보내기', "ja": '設定のインポート・エクスポート'},
     "settings_export": {"zh_CN": '导出设置', "zh_TW": '匯出設定', "en": 'Export settings', "ko": '설정 내보내기', "ja": '設定をエクスポート'},

@@ -68,10 +68,24 @@ class PostprocessorOrderTests(unittest.TestCase):
 
     def test_mark_adds_sponsorblock_and_chapters_metadata(self):
         keys = self._keys(extras={"sponsorblock": "mark"})
-        self.assertEqual(keys, ["SponsorBlock", "FFmpegMetadata"])
+        # ModifyChapters 不只是剪切用的：SponsorBlock 的片段先进
+        # sponsorblock_chapters，只有它会把片段并进 chapters，元数据那一步才写得出来。
+        # 真机实测：少了它，标记模式下产物里只有视频自带的章节。
+        self.assertEqual(keys, ["SponsorBlock", "ModifyChapters", "FFmpegMetadata"])
         posts = core.media_postprocessors(extras={"sponsorblock": "mark"})
-        self.assertTrue(posts[1]["add_chapters"], "标记模式必须让元数据写章节")
-        self.assertFalse(posts[1]["add_metadata"], "没勾元数据就不该顺手写元数据")
+        self.assertEqual(posts[1]["remove_sponsor_segments"], [],
+                         "标记模式不该剪掉任何片段")
+        self.assertTrue(posts[2]["add_chapters"], "标记模式必须让元数据写章节")
+        self.assertFalse(posts[2]["add_metadata"], "没勾元数据就不该顺手写元数据")
+
+    def test_mark_and_remove_differ_only_in_the_remove_list(self):
+        """两种模式的差别只在「剪不剪」，ModifyChapters 必须都在。"""
+        mark = core.media_postprocessors(extras={"sponsorblock": "mark"})
+        remove = core.media_postprocessors(extras={"sponsorblock": "remove"})
+        self.assertEqual([p["key"] for p in mark],
+                         [p["key"] for p in remove] + ["FFmpegMetadata"])
+        self.assertTrue(remove[1]["remove_sponsor_segments"])
+        self.assertEqual(mark[1]["remove_sponsor_segments"], [])
 
     def test_remove_cuts_segments(self):
         posts = core.media_postprocessors(extras={"sponsorblock": "remove"})

@@ -352,8 +352,10 @@ def embed_postprocessors(subtitles=False, thumbnail=False, metadata=False,
         posts.append({"key": "FFmpegEmbedSubtitle",
                       "already_have_subtitle": bool(keep_subtitles)})
     if metadata or add_chapters:
-        # add_chapters 单独打开也要建这个后处理器：SponsorBlock 的「标记」模式
-        # 就是靠它把标记写成章节，没有这一步标记哪儿都不会出现
+        # add_chapters 单独打开也要建这个后处理器：真正把 info['chapters'] 写进
+        # 容器的是它。但**光有它不够**——SponsorBlock 的片段先进
+        # info['sponsorblock_chapters']，得由 ModifyChapters 并进 chapters，
+        # 所以标记模式在 media_postprocessors 里还会额外加那一步。
         posts.append({"key": "FFmpegMetadata", "add_metadata": bool(metadata),
                       "add_chapters": bool(add_chapters), "add_infojson": False})
     if thumbnail:
@@ -405,9 +407,17 @@ def media_postprocessors(embed=None, extras=None, subtitles=False) -> list:
         # after_filter：等格式筛选完再查，避免为不会下载的格式白跑一次接口
         posts.append({"key": "SponsorBlock", "categories": categories,
                       "when": "after_filter"})
-    if mode == "remove":
+        # 标记模式**也必须**跑 ModifyChapters（命令行层就是这么做的：只要查了
+        # SponsorBlock 就加这一个）。SponsorBlock 查到的片段落在
+        # info['sponsorblock_chapters']，只有 ModifyChapters 会把它们并进
+        # info['chapters']，后面的 FFmpegMetadata 才可能写进容器。只开
+        # add_chapters 时标记哪儿都不会出现——真机实测：标记模式下产物里只有
+        # 视频自带的章节，被标记的广告段不见踪影（剪切模式因为本来就加了这一步
+        # 才一直正常）。另一个后果是标记模式现在真的会调 ffprobe 读一次真实时长，
+        # 所以 needs_ffprobe() 对 mark 返回 True 是必需的。
         posts.append({"key": "ModifyChapters",
-                      "remove_sponsor_segments": categories})
+                      "remove_sponsor_segments": (categories if mode == "remove"
+                                                  else [])})
     posts += embed_postprocessors(keep_subtitles=bool(subtitles),
                                   add_chapters=(mode == "mark"), **embedding)
     if split:

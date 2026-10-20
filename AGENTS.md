@@ -420,6 +420,14 @@ playlist downloads. Same trap as embedding, same conclusion:
 - **Order is a constraint, not a preference**: `ModifyChapters` must run *before* `FFmpegMetadataPP`
   (the CLI says so in a comment) — otherwise the metadata is written into the version that still has
   the sponsor segments and the chapters no longer match the cut file. Splitting runs last.
+- **`ModifyChapters` belongs to *both* SponsorBlock modes, not just cutting.** The CLI adds it whenever
+  a SponsorBlock query happens, because the segments land in `info['sponsorblock_chapters']` and only
+  `ModifyChapters` copies them into `info['chapters']`; `FFmpegMetadataPP` then writes those chapters
+  into the container. Mark mode used to add only `SponsorBlock` + `FFmpegMetadata`, so a real download
+  produced a file with the video's own chapters and the marked segments nowhere in it (verified live
+  on Windows against a video with an `intro` segment). Consequence: mark mode now really calls ffprobe
+  (`ModifyChapters` always reads the real duration) — hence `needs_ffprobe()` returning True for it,
+  and the settings warning naming marking as well as cutting.
 - `ratelimit` and `concurrent_fragment_downloads` **are** real API parameters (the downloaders read
   them from `params`). Two details: `ratelimit` is in **bytes per second** (the UI stores KB/s), and
   `concurrent_fragment_downloads` only affects native HLS/DASH — 1 means "let yt-dlp decide", so 1 is
