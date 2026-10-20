@@ -27,6 +27,22 @@ def log(*records):
     return out
 
 
+def run_script(*args, cwd=None):
+    """用子进程跑发布说明脚本，两端都钉成 UTF-8。
+
+    输出编码原本跟着环境走：子进程没设 PYTHONIOENCODING 时，Windows 中文环境
+    print 出来的是 GBK；父进程 text=True 按本机编码解码，一旦开发者的 shell 带了
+    PYTHONIOENCODING=utf-8（写中文日志的常用设置），解码失败还会把 stdout 变成
+    None，断言于是报 ``argument of type 'NoneType' is not iterable``，看起来像
+    脚本坏了。两边都显式指定编码后，这条用例不再看环境脸色。
+    """
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    return subprocess.run(
+        [sys.executable, str(ROOT / "build" / "release_notes.py"), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=env, cwd=cwd or ROOT, timeout=120)
+
+
 class ParseTests(unittest.TestCase):
     def test_split_fields_and_records(self):
         commits = rn.parse_commits(log(("feat(repo): 加了功能", "- 要点一\n- 要点二"),
@@ -238,9 +254,7 @@ class InstallSectionTests(unittest.TestCase):
         self.assertLess(notes.index("Full Changelog"), notes.index("## 安装"))
 
     def test_install_only_prints_just_the_section(self):
-        result = subprocess.run(
-            [sys.executable, str(ROOT / "build" / "release_notes.py"), "--install-only"],
-            capture_output=True, text=True, cwd=ROOT, timeout=120)
+        result = run_script("--install-only")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("## 安装 / Installation", result.stdout)
         self.assertNotIn("Full Changelog", result.stdout)
@@ -249,20 +263,14 @@ class InstallSectionTests(unittest.TestCase):
     def test_install_only_works_without_a_git_repository(self):
         """CI 的兜底路径：说明生成失败时用它救场，不能依赖仓库或标签。"""
         with tempfile.TemporaryDirectory() as tmp:
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "build" / "release_notes.py"),
-                 "--install-only"],
-                capture_output=True, text=True, cwd=tmp, timeout=120)
+            result = run_script("--install-only", cwd=tmp)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("xattr -dr com.apple.quarantine", result.stdout)
 
     def test_install_only_writes_the_output_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = os.path.join(tmp, "release-notes.md")
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "build" / "release_notes.py"),
-                 "--install-only", "--output", target],
-                capture_output=True, text=True, cwd=ROOT, timeout=120)
+            result = run_script("--install-only", "--output", target)
             self.assertEqual(result.returncode, 0, result.stderr)
             with open(target, encoding="utf-8") as handle:
                 self.assertIn("## 安装 / Installation", handle.read())
